@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* DES Informantes — paleta periodística institucional */
+    --background: 210 20% 98%;
+    --foreground: 215 30% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 30% 12%;
+    --primary: 215 50% 23%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 215 30% 12%;
+    --muted: 210 18% 93%;
+    --muted-foreground: 215 15% 45%;
+    --accent: 355 78% 56%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 215 20% 88%;
+    --input: 215 20% 88%;
+    --ring: 215 50% 23%;
+    --radius: 0.625rem;
+    --sidebar-background: 210 20% 98%;
+    --sidebar-foreground: 215 30% 12%;
+    --sidebar-primary: 215 50% 23%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 20% 94%;
+    --sidebar-accent-foreground: 215 30% 12%;
+    --sidebar-border: 215 20% 88%;
+    --sidebar-ring: 215 50% 23%;
+  }
+
+  .dark {
+    --background: 215 30% 8%;
+    --foreground: 210 30% 95%;
+    --card: 215 28% 11%;
+    --card-foreground: 210 30% 95%;
+    --popover: 215 28% 11%;
+    --popover-foreground: 210 30% 95%;
+    --primary: 215 60% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 22% 16%;
+    --secondary-foreground: 210 30% 95%;
+    --muted: 215 20% 14%;
+    --muted-foreground: 215 15% 60%;
+    --accent: 355 80% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 215 22% 18%;
+    --input: 215 22% 18%;
+    --ring: 215 60% 60%;
+    --sidebar-background: 215 30% 8%;
+    --sidebar-foreground: 210 30% 95%;
+    --sidebar-primary: 215 60% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 22% 16%;
+    --sidebar-accent-foreground: 210 30% 95%;
+    --sidebar-border: 215 22% 18%;
+    --sidebar-ring: 215 60% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Utilidades de marca DES Informantes */
+.di-gradient {
+  background: linear-gradient(135deg, #0a2540 0%, #1a3a5c 55%, #e63946 130%);
+}
+
+.di-gradient-soft {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.font-display {
+  font-family: "Bree Serif", Georgia, "Times New Roman", serif;
+}
+
+/* Prose para markdown */
+.prose-di h1 {
+  @apply font-display text-2xl mt-6 mb-3 text-primary;
+}
+.prose-di h2 {
+  @apply font-display text-xl mt-5 mb-2 text-foreground;
+}
+.prose-di h3 {
+  @apply font-semibold text-base mt-4 mb-1.5 text-foreground;
+}
+.prose-di p {
+  @apply text-sm leading-relaxed mb-2 text-foreground/90;
+}
+.prose-di ul {
+  @apply list-disc pl-5 mb-2 text-sm;
+}
+.prose-di ol {
+  @apply list-decimal pl-5 mb-2 text-sm;
+}
+.prose-di li {
+  @apply mb-1 leading-relaxed;
+}
+.prose-di strong {
+  @apply font-semibold text-foreground;
+}
+.prose-di hr {
+  @apply my-4 border-border;
+}
+.prose-di code {
+  @apply bg-muted px-1.5 py-0.5 rounded text-xs;
+}
+
+@keyframes pulse-rec {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.15); }
+}
+.animate-rec {
+  animation: pulse-rec 1s ease-in-out infinite;
+}

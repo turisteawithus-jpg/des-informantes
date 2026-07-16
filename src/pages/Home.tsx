@@ -1,0 +1,170 @@
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { AppHeader } from "@/components/AppHeader";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { trpc } from "@/providers/trpc";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  Mic,
+  MessageSquareText,
+  Sparkles,
+  FileText,
+  Map,
+  ListChecks,
+  Globe,
+  Users,
+  Send,
+  ArrowRight,
+  Newspaper,
+} from "lucide-react";
+
+const features = [
+  { icon: Globe, title: "Ecosistema digital", desc: "Un espacio online donde equipos crean, conversan y sistematizan su trabajo en mesas organizadas." },
+  { icon: Mic, title: "Discusiones con voz", desc: "Cada audio se transcribe automáticamente con IA. Nadie tiene que tomar notas." },
+  { icon: MessageSquareText, title: "Texto y audio juntos", desc: "El mismo espacio funciona con mensajes escritos y grabaciones. Todo queda documentado." },
+  { icon: Sparkles, title: "Moderación inteligente", desc: "La IA resume la discusión periódicamente: conclusiones, tareas y ambiente del debate." },
+  { icon: FileText, title: "Relatorías automáticas", desc: "Al cerrar una sesión se genera la relatoría oficial con temas, acuerdos y pendientes." },
+  { icon: Map, title: "Mapa de documentos", desc: "Cada documento se conecta por temas. El proceso del proyecto se ve de un vistazo." },
+  { icon: ListChecks, title: "Tareas con seguimiento", desc: "Las tareas nacen de la conversación, se asignan con fechas y se vinculan a sus resultados." },
+  { icon: Users, title: "Mesas de trabajo", desc: "Crea o únete a mesas aprobadas. Cada mesa tiene su administrador y su estructura propia." },
+];
+
+export default function Home() {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+  const [text, setText] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const messages = trpc.globalChat.list.useQuery(undefined, {
+    refetchInterval: 4000,
+  });
+
+  const send = trpc.globalChat.send.useMutation({
+    onSuccess: () => {
+      setText("");
+      messages.refetch();
+    },
+  });
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.data?.length]);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <AppHeader />
+
+      {/* Hero */}
+      <section className="di-gradient text-white">
+        <div className="max-w-6xl mx-auto px-4 py-16 md:py-20 text-center">
+          <h1 className="font-display text-4xl md:text-6xl mb-4 drop-shadow">Más allá del relato,<br />están los hechos.</h1>
+          <p className="text-lg md:text-xl max-w-2xl mx-auto opacity-90 mb-4">
+            DES Informantes es un <strong>ecosistema de trabajo digital online</strong> donde los equipos conversan, documentan y sistematizan sus proyectos con el apoyo de la inteligencia artificial.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mb-10">
+            {isAuthenticated ? (
+              <Button size="lg" className="bg-white text-[#0a2540] hover:bg-gray-100 font-semibold text-base gap-2" onClick={() => navigate("/dashboard")}>
+                Ir a mis mesas <ArrowRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <>
+                <Button size="lg" className="bg-white text-[#0a2540] hover:bg-gray-100 font-semibold text-base" onClick={() => navigate("/register")}>Crear cuenta</Button>
+                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/15 text-base" onClick={() => navigate("/login")}>Ya tengo cuenta</Button>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Chat global público */}
+      <section className="max-w-4xl mx-auto w-full px-4 -mt-6 relative z-10">
+        <Card className="border-2 shadow-xl">
+          <div className="bg-primary text-white px-4 py-2.5 rounded-t-lg flex items-center gap-2">
+            <MessageSquareText className="h-4 w-4" />
+            <span className="text-sm font-medium">Chat general de DES Informantes — conversación abierta para toda la comunidad</span>
+          </div>
+          <CardContent className="p-0">
+            <div className="h-[320px] overflow-y-auto p-4 space-y-2 bg-secondary/30">
+              {messages.data?.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">Sé el primero en escribir en el chat general.</p>
+              )}
+              {[...(messages.data ?? [])].reverse().map((m) => (
+                <div key={m.id} className="flex gap-2">
+                  <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
+                    {m.username[0]?.toUpperCase()}
+                  </div>
+                  <div className="bg-card border rounded-lg px-3 py-1.5 text-sm max-w-[85%]">
+                    <span className="font-semibold text-xs text-primary">{m.username}</span>
+                    <p className="text-foreground/90">{m.content}</p>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+            {isAuthenticated ? (
+              <form className="p-3 border-t flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) send.mutate({ content: text.trim() }); }}>
+                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe algo en el chat general…" className="flex-1" />
+                <Button type="submit" size="icon" disabled={send.isPending || !text.trim()}><Send className="h-4 w-4" /></Button>
+              </form>
+            ) : (
+              <div className="p-3 border-t text-center text-sm text-muted-foreground">
+                <Button variant="link" className="p-0 h-auto" onClick={() => navigate("/login")}>Inicia sesión</Button> para participar en el chat general.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Features */}
+      <section className="max-w-6xl mx-auto px-4 py-16">
+        <h2 className="font-display text-3xl text-center mb-2">Un ecosistema completo para trabajar</h2>
+        <p className="text-center text-muted-foreground mb-10">Crea mesas de trabajo, conversa, documenta y deja que la IA organice todo.</p>
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {features.map((f) => (
+            <Card key={f.title} className="border-2 hover:shadow-lg transition-shadow">
+              <CardContent className="pt-6">
+                <div className="w-10 h-10 rounded-lg di-gradient flex items-center justify-center mb-3">
+                  <f.icon className="h-5 w-5 text-white" />
+                </div>
+                <h3 className="font-display text-base mb-1">{f.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* Cómo funciona */}
+      <section className="di-gradient-soft border-y">
+        <div className="max-w-4xl mx-auto px-4 py-16">
+          <h2 className="font-display text-3xl text-center mb-10">Así funciona</h2>
+          <div className="grid md:grid-cols-3 gap-8">
+            {[
+              { n: "1", t: "Regístrate", d: "Crea tu cuenta con correo y contraseña. Verifica tu correo y entra al ecosistema." },
+              { n: "2", t: "Crea o únete a una mesa", d: "Solicita crear una nueva mesa de trabajo (espera aprobación) o solicita unirte a una mesa existente." },
+              { n: "3", t: "Conversa y sistematiza", d: "Dentro de cada mesa, abre discusiones por voz o texto. La IA transcribe, resume y genera relatorías." },
+            ].map((s) => (
+              <div key={s.n} className="text-center">
+                <div className="w-12 h-12 mx-auto rounded-full di-gradient text-white font-display text-2xl flex items-center justify-center mb-3 shadow">{s.n}</div>
+                <h3 className="font-display text-lg mb-1">{s.t}</h3>
+                <p className="text-sm text-muted-foreground">{s.d}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer className="mt-auto py-6 text-center text-sm text-muted-foreground">
+        <div className="flex items-center justify-center gap-2">
+          <Newspaper className="h-4 w-4" />
+          DES Informantes — ecosistema de trabajo digital online.
+        </div>
+      </footer>
+    </div>
+  );
+}
