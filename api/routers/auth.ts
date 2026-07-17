@@ -28,22 +28,26 @@ async function issueVerificationCode(userId: number): Promise<string> {
   return code;
 }
 
+function setCookie(res: any, cookie: string) {
+  const existing = res.getHeader("Set-Cookie");
+  if (existing) {
+    res.setHeader("Set-Cookie", Array.isArray(existing) ? [...existing, cookie] : [existing, cookie]);
+  } else {
+    res.setHeader("Set-Cookie", cookie);
+  }
+}
+
 export const authRouter = createRouter({
-  /** Sesión actual (o null). */
   me: publicQuery.query(async ({ ctx }) => {
     const { getSessionFromRequest } = await import("../lib/auth");
     return getSessionFromRequest(ctx.req);
   }),
 
-  /** Registro: correo + nombre de usuario + contraseña. */
   register: publicQuery
     .input(
       z.object({
         email: z.string().email("Correo inválido"),
-        username: z
-          .string()
-          .min(2, "El nombre de usuario es muy corto")
-          .max(80),
+        username: z.string().min(2, "El nombre de usuario es muy corto").max(80),
         password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
       }),
     )
@@ -61,7 +65,6 @@ export const authRouter = createRouter({
         });
       }
 
-      // El correo configurado como ADMIN_EMAIL se vuelve administrador.
       const role =
         env.adminEmail && email === env.adminEmail ? "admin" : "member";
 
@@ -76,7 +79,7 @@ export const authRouter = createRouter({
       const code = await issueVerificationCode(userId);
       const sendResult = await sendEmail({
         to: email,
-        subject: "🎭 TítereHub — Verifica tu correo",
+        subject: "DES Informantes - Verifica tu correo",
         html: verificationEmailHtml(code, input.username.trim()),
       });
 
@@ -88,7 +91,6 @@ export const authRouter = createRouter({
       };
     }),
 
-  /** Reenviar código de verificación. */
   resendCode: publicQuery
     .input(z.object({ email: z.string().email() }))
     .mutation(async ({ input }) => {
@@ -106,13 +108,12 @@ export const authRouter = createRouter({
       const code = await issueVerificationCode(user.id);
       const sendResult = await sendEmail({
         to: email,
-        subject: "🎭 TítereHub — Tu nuevo código de verificación",
+        subject: "DES Informantes - Tu nuevo código de verificación",
         html: verificationEmailHtml(code, user.username),
       });
       return { ok: true, alreadyVerified: false, devMode: sendResult.devMode };
     }),
 
-  /** Verificar correo con el código de 6 dígitos. */
   verifyEmail: publicQuery
     .input(
       z.object({
@@ -155,19 +156,17 @@ export const authRouter = createRouter({
         .set({ emailVerified: true })
         .where(eq(users.id, user.id));
 
-      // Inicia sesión automáticamente tras verificar.
       const token = createSessionToken({
         userId: user.id,
         email: user.email,
         username: user.username,
         role: user.role,
       });
-      ctx.resHeaders.append("Set-Cookie", sessionCookieHeader(token));
+      setCookie(ctx.res, sessionCookieHeader(token));
 
       return { ok: true, role: user.role };
     }),
 
-  /** Iniciar sesión. */
   login: publicQuery
     .input(
       z.object({
@@ -201,14 +200,13 @@ export const authRouter = createRouter({
         username: user.username,
         role: user.role,
       });
-      ctx.resHeaders.append("Set-Cookie", sessionCookieHeader(token));
+      setCookie(ctx.res, sessionCookieHeader(token));
 
       return { ok: true, role: user.role, username: user.username };
     }),
 
-  /** Cerrar sesión. */
   logout: authedProcedure.mutation(({ ctx }) => {
-    ctx.resHeaders.append("Set-Cookie", clearSessionCookieHeader());
+    setCookie(ctx.res, clearSessionCookieHeader());
     return { ok: true };
   }),
 });
