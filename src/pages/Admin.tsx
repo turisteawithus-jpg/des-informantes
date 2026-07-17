@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Users, Briefcase, Loader2, Shield, Clock, CheckCircle, XCircle,
-  Crown,
+  Crown, Trash2, UserCheck,
 } from "lucide-react";
 
 export default function Admin() {
@@ -62,6 +62,29 @@ export default function Admin() {
     fetchAll();
   }
 
+  async function verifyUser(userId: number) {
+    await fetch(`/api/rest/workspaces/admin/verify-user/${userId}`, {
+      method: "POST", credentials: "include",
+    });
+    fetchAll();
+  }
+
+  async function deleteWorkspace(wsId: number) {
+    if (!confirm("Eliminar esta mesa permanentemente?")) return;
+    await fetch(`/api/rest/workspaces/admin/workspaces/${wsId}`, {
+      method: "DELETE", credentials: "include",
+    });
+    fetchAll();
+  }
+
+  async function deleteUser(userId: number) {
+    if (!confirm("Eliminar este usuario permanentemente?")) return;
+    await fetch(`/api/rest/workspaces/admin/users/${userId}`, {
+      method: "DELETE", credentials: "include",
+    });
+    fetchAll();
+  }
+
   if (authLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!isAdmin) { navigate("/dashboard"); return null; }
 
@@ -77,7 +100,7 @@ export default function Admin() {
       <main className="max-w-6xl mx-auto w-full px-4 py-8 flex-1">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-12 h-12 rounded-xl di-gradient flex items-center justify-center"><Shield className="h-6 w-6 text-white" /></div>
-          <div><h1 className="font-display text-3xl">Panel de administrador general</h1><p className="text-sm text-muted-foreground">Gestión completa de DES Informantes</p></div>
+          <div><h1 className="font-display text-3xl">Panel de administrador general</h1><p className="text-sm text-muted-foreground">Gestion completa de DES Informantes</p></div>
         </div>
 
         {loading && <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>}
@@ -86,7 +109,7 @@ export default function Admin() {
           <Card className="border-2 border-amber-400 mb-6">
             <CardContent className="py-4 flex items-center gap-3">
               <Clock className="h-5 w-5 text-amber-600" />
-              <p className="text-sm"><strong>{stats.pendingWorkspaces} mesa(s)</strong> pendiente(s) de aprobación.</p>
+              <p className="text-sm"><strong>{stats.pendingWorkspaces} mesa(s)</strong> pendiente(s) de aprobacion.</p>
             </CardContent>
           </Card>
         )}
@@ -104,13 +127,13 @@ export default function Admin() {
 
           <TabsContent value="pending" className="mt-4">
             <Card className="border-2">
-              <CardHeader><CardTitle className="font-display flex items-center gap-2"><Clock className="h-5 w-5" /> Mesas pendientes de aprobación</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="font-display flex items-center gap-2"><Clock className="h-5 w-5" /> Mesas pendientes de aprobacion</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {pendingWs.length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No hay mesas pendientes.</p>}
                 {pendingWs.map((ws: any) => (
                   <div key={ws.id} className="border rounded-lg px-4 py-3">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div><p className="font-medium">{ws.name}</p><p className="text-xs text-muted-foreground">{ws.area || "Sin área"} · {ws.description?.slice(0, 100)}{ws.description && ws.description.length > 100 ? "…" : ""}</p></div>
+                      <div><p className="font-medium">{ws.name}</p><p className="text-xs text-muted-foreground">{ws.area || "Sin area"} - {ws.description?.slice(0, 100)}{ws.description && ws.description.length > 100 ? "…" : ""}</p></div>
                       <div className="flex gap-2">
                         <Button size="sm" className="gap-1" onClick={() => approveWs(ws.id)}><CheckCircle className="h-3.5 w-3.5" /> Aprobar</Button>
                         <Button size="sm" variant="ghost" className="gap-1 text-destructive" onClick={() => rejectWs(ws.id)}><XCircle className="h-3.5 w-3.5" /> Rechazar</Button>
@@ -131,7 +154,10 @@ export default function Admin() {
                   <div key={ws.id} className="border rounded-lg px-4 py-3">
                     <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                       <p className="font-medium">{ws.name}</p>
-                      <Badge variant="outline" className="gap-1"><Crown className="h-3 w-3" />{ws.adminName || "Sin admin"}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="gap-1"><Crown className="h-3 w-3" />{ws.adminName || "Sin admin"}</Badge>
+                        <Button size="sm" variant="ghost" className="text-destructive gap-1" onClick={() => deleteWorkspace(ws.id)}><Trash2 className="h-3.5 w-3.5" /> Eliminar</Button>
+                      </div>
                     </div>
                     <div className="space-y-1">
                       {ws.members?.map((m: any) => (
@@ -154,9 +180,11 @@ export default function Admin() {
                 {usersList.map((u: any) => (
                   <div key={u.id} className="flex items-center gap-3 flex-wrap border rounded-lg px-3 py-2">
                     <div className="flex-1 min-w-[180px]"><p className="font-medium">{u.username}</p><p className="text-xs text-muted-foreground">{u.email}</p></div>
-                    {u.emailVerified ? <Badge variant="secondary" className="text-green-700">✓ Verificado</Badge> : <Badge variant="secondary" className="text-amber-700">Sin verificar</Badge>}
+                    {u.emailVerified ? <Badge variant="secondary" className="text-green-700">Verificado</Badge> : <Badge variant="secondary" className="text-amber-700">Sin verificar</Badge>}
                     <Badge className={u.role === "admin" ? "di-gradient text-white" : ""}>{u.role === "admin" ? "Administrador" : "Miembro"}</Badge>
+                    {!u.emailVerified && <Button size="sm" variant="secondary" className="gap-1" onClick={() => verifyUser(u.id)}><UserCheck className="h-3.5 w-3.5" /> Verificar</Button>}
                     <Button size="sm" variant="outline" onClick={() => toggleRole(u.id, u.role)}>{u.role === "admin" ? "Quitar admin" : "Hacer admin"}</Button>
+                    <Button size="sm" variant="ghost" className="text-destructive gap-1" onClick={() => deleteUser(u.id)}><Trash2 className="h-3.5 w-3.5" /> Eliminar</Button>
                   </div>
                 ))}
               </CardContent>
