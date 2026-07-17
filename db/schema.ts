@@ -144,7 +144,28 @@ export const summaries = mysqlTable("summaries", {
   messageCount: int("message_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+/* ----------------------- CHATS PRIVADOS ----------------------- */
 
+export const privateConversations = mysqlTable(
+  "private_conversations",
+  {
+    id: serial("id").primaryKey(),
+    user1Id: bigint("user1_id", { mode: "number", unsigned: true }).notNull(),
+    user2Id: bigint("user2_id", { mode: "number", unsigned: true }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => [uniqueIndex("private_conv_unique").on(t.user1Id, t.user2Id)],
+);
+
+export const privateMessages = mysqlTable("private_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: bigint("conversation_id", { mode: "number", unsigned: true }).notNull(),
+  senderId: bigint("sender_id", { mode: "number", unsigned: true }).notNull(),
+  content: text("content").notNull(),
+  read: boolean("read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 /* ------------------------------- TAREAS ------------------------------- */
 
 export const tasks = mysqlTable("tasks", {
