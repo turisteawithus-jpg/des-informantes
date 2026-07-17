@@ -1,39 +1,33 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { HttpBindings } from "@hono/node-server";
-import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { nodeHTTPRequestHandler } from "@trpc/server/adapters/node-http";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
 import { uploadRouter } from "./uploads";
 
-const app = new Hono<{ Bindings: HttpBindings }>();  
+const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
-app.use("/api/trpc/*", async (c) => {
-  const host = c.req.header("host") || "localhost:3000";
-  const protocol = c.req.header("x-forwarded-proto") || "http";
-  
-  // Fix: c.req.url puede ya venir como URL absoluta desde Hono
-  const reqUrl = String(c.req.url);
-  const isAbsolute = reqUrl.startsWith("http://") || reqUrl.startsWith("https://");
-  
-  const req = isAbsolute
-    ? c.req.raw
-    : new Request(protocol + "://" + host + reqUrl, {
-        method: c.req.method,
-        headers: c.req.raw.headers,
-        body: c.req.raw.body,
-      });
 
-  return fetchRequestHandler({
-    endpoint: "/api/trpc",
-    req,
+// Fix: usar adapter node-http de tRPC (diseñado para Node.js)
+app.use("/api/trpc/*", async (c) => {
+  const nodeReq = c.env.incoming;
+  const nodeRes = c.env.outgoing;
+
+  await nodeHTTPRequestHandler({
+    req: nodeReq,
+    res: nodeRes,
+    path: c.req.path.replace("/api/trpc/", "").replace("/api/trpc", ""),
     router: appRouter,
-    createContext,
+    createContext: () => createContext({ req: c.req.raw, resHeaders: c.res.headers }),
+    batching: { enabled: true },
   });
+
+  return c.body(null);
 });
-// TítereHub — subida de audios y documentos (REST multipart)
+
 app.route("/api/upload", uploadRouter);
 app.route("/api", uploadRouter);
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
