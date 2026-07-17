@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard'
 import WorkspaceView from './pages/WorkspaceView'
 import DiscussionRoom from './pages/DiscussionRoom'
 import Admin from './pages/Admin'
+import Conversations from './pages/Conversations'
+import ConversationView from './pages/ConversationView'
 import NotFound from './pages/NotFound'
 
 export default function App() {
@@ -20,6 +22,8 @@ export default function App() {
       <Route path="/workspace/:id" element={<WorkspaceView />} />
       <Route path="/discussion/:id" element={<DiscussionRoom />} />
       <Route path="/admin" element={<Admin />} />
+      <Route path="/conversations" element={<Conversations />} />
+      <Route path="/conversation/:id" element={<ConversationView />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   )
