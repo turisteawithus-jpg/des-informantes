@@ -10,7 +10,6 @@ const t = initTRPC.context<TrpcContext>().create({
 export const createRouter = t.router;
 export const publicQuery = t.procedure;
 
-/** Requiere sesión iniciada. */
 export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   const session = getSessionFromRequest(ctx.req);
   if (!session) {
@@ -22,7 +21,6 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   return next({ ctx: { ...ctx, session } });
 });
 
-/** Requiere rol de administrador. */
 export const adminProcedure = authedProcedure.use(({ ctx, next }) => {
   if (ctx.session.role !== "admin") {
     throw new TRPCError({
