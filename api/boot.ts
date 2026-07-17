@@ -6,6 +6,7 @@ import { nodeHTTPRequestHandler } from "@trpc/server/adapters/node-http";
 import { appRouter } from "./router";
 import { env } from "./lib/env";
 import { uploadRouter } from "./uploads";
+import restAuth from "./restAuth";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -39,6 +40,7 @@ app.use("/api/trpc/*", async (c) => {
 app.route("/api/upload", uploadRouter);
 app.route("/api", uploadRouter);
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+app.route("/api/rest", restAuth);
 
 if (env.isProduction) {
   const { serveStaticFiles } = await import("./lib/vite");
