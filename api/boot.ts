@@ -39,8 +39,8 @@ app.use("/api/trpc/*", async (c) => {
 
 app.route("/api/upload", uploadRouter);
 app.route("/api", uploadRouter);
-app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 app.route("/api/rest", restAuth);
+app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 if (env.isProduction) {
   const { serveStaticFiles } = await import("./lib/vite");
