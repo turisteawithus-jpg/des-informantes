@@ -11,9 +11,19 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.use("/api/trpc/*", async (c) => {
+  const host = c.req.header("host") || "localhost:3000";
+  const protocol = c.req.header("x-forwarded-proto") || "http";
+  const url = c.req.url.startsWith("http")
+    ? c.req.raw
+    : new Request(protocol + "://" + host + c.req.url, {
+        method: c.req.method,
+        headers: c.req.raw.headers,
+        body: c.req.raw.body,
+      });
+
   return fetchRequestHandler({
     endpoint: "/api/trpc",
-    req: c.req.raw,
+    req: url,
     router: appRouter,
     createContext,
   });
