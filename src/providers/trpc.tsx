@@ -11,14 +11,11 @@ const queryClient = new QueryClient();
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url:
+        typeof window !== "undefined"
+          ? `${window.location.origin}/api/trpc`
+          : "/api/trpc",
       transformer: superjson,
-      fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
-      },
     }),
   ],
 });
