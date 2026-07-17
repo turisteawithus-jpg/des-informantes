@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Shield, LayoutDashboard, Newspaper } from "lucide-react";
+import { LogOut, Shield, LayoutDashboard, Newspaper, MessageCircle } from "lucide-react";
 
 export function AppHeader() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
@@ -23,6 +23,9 @@ export function AppHeader() {
             <>
               <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
                 <LayoutDashboard className="h-4 w-4 mr-1" /> Mis mesas
+              </Button>
+              <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/conversations")}>
+                <MessageCircle className="h-4 w-4 mr-1" /> Chats
               </Button>
               {isAdmin && (
                 <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/admin")}>
