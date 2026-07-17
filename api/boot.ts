@@ -13,12 +13,14 @@ app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.use("/api/trpc/*", async (c) => {
   const host = c.req.header("host") || "localhost:3000";
   const protocol = c.req.header("x-forwarded-proto") || "http";
-  const fullUrl = protocol + "://" + host + c.req.url;
-  console.log("DEBUG: host=" + host + " protocol=" + protocol + " url=" + c.req.url + " fullUrl=" + fullUrl);
   
-  const req = c.req.url.startsWith("http")
+  // Fix: c.req.url puede ya venir como URL absoluta desde Hono
+  const reqUrl = String(c.req.url);
+  const isAbsolute = reqUrl.startsWith("http://") || reqUrl.startsWith("https://");
+  
+  const req = isAbsolute
     ? c.req.raw
-    : new Request(fullUrl, {
+    : new Request(protocol + "://" + host + reqUrl, {
         method: c.req.method,
         headers: c.req.raw.headers,
         body: c.req.raw.body,
