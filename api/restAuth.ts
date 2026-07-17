@@ -19,15 +19,19 @@ const restAuth = new Hono();
 // Registro directo (sin tRPC)
 restAuth.post("/register", async (c) => {
   try {
+    console.log("[register] Step 1: Parsing body");
     const body = await c.req.json();
     const { email, username, password } = body;
+    console.log("[register] Step 2: Body parsed", { email, username });
 
     if (!email || !username || !password || password.length < 8) {
       return c.json({ error: "Datos inválidos. La contraseña debe tener al menos 8 caracteres." }, 400);
     }
 
+    console.log("[register] Step 3: Getting DB");
     const db = getDb();
     const emailLower = email.toLowerCase().trim();
+    console.log("[register] Step 4: Checking existing user");
 
     const existing = await db.query.users.findFirst({
       where: eq(users.email, emailLower),
@@ -36,6 +40,7 @@ restAuth.post("/register", async (c) => {
       return c.json({ error: "Ya existe una cuenta con ese correo." }, 409);
     }
 
+    console.log("[register] Step 5: Creating user");
     const role = env.adminEmail && emailLower === env.adminEmail ? "admin" : "member";
 
     const [result] = await db.insert(users).values({
@@ -45,24 +50,36 @@ restAuth.post("/register", async (c) => {
       role,
     });
 
+    console.log("[register] Step 6: User created, ID:", result.insertId);
     const userId = Number(result.insertId);
+    
+    console.log("[register] Step 7: Generating code");
     const code = generateVerificationCode();
+    
+    console.log("[register] Step 8: Inserting code");
     await db.insert(emailVerificationCodes).values({
       userId,
       code,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
 
-    await sendEmail({
+    console.log("[register] Step 9: Sending email to:", emailLower);
+    console.log("[register] Step 9a: resendFrom:", env.resendFrom);
+    console.log("[register] Step 9b: resendApiKey exists:", !!env.resendApiKey);
+    
+    const sendResult = await sendEmail({
       to: emailLower,
       subject: "DES Informantes - Verifica tu correo",
       html: verificationEmailHtml(code, username.trim()),
     });
 
+    console.log("[register] Step 10: Email result:", sendResult);
+
     return c.json({ ok: true, userId });
 
   } catch (e: any) {
-    console.error("[register] Error:", e);
+    console.error("[register] CRASH at step unknown:", e.message);
+    console.error("[register] Stack:", e.stack);
     return c.json({ error: "Error interno: " + e.message }, 500);
   }
 });
