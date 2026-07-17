@@ -1,49 +1,49 @@
 import { Hono } from "hono";
+import { serve } from "@hono/node-server";
 import { bodyLimit } from "hono/body-limit";
-import { createServer } from "node:http";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { HttpBindings } from "@hono/node-server";
 import { nodeHTTPRequestHandler } from "@trpc/server/adapters/node-http";
 import { appRouter } from "./router";
 import { env } from "./lib/env";
 import { uploadRouter } from "./uploads";
 
-const honoApp = new Hono();
+const app = new Hono<{ Bindings: HttpBindings }>();
 
-honoApp.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
-honoApp.route("/api/upload", uploadRouter);
-honoApp.route("/api", uploadRouter);
-honoApp.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
-// Router tRPC v11 con adapter node-http
-async function handleTRPC(req: IncomingMessage, res: ServerResponse) {
-  const path = req.url?.replace("/api/trpc/", "").split("?")[0] || "";
+// tRPC via nodeHTTPRequestHandler usando Hono bindings
+app.use("/api/trpc/*", async (c) => {
+  const incoming = c.env.incoming;
+  const outgoing = c.env.outgoing;
+  
+  const path = c.req.path.replace("/api/trpc/", "").replace("/api/trpc", "");
   
   await nodeHTTPRequestHandler({
-    req,
-    res,
+    req: incoming,
+    res: outgoing,
     path,
     router: appRouter,
-    createContext: () => ({ req, res }),
+    createContext: () => ({ req: incoming, res: outgoing }),
     batching: { enabled: true },
   });
-}
-
-const server = createServer((req, res) => {
-  if (req.url?.startsWith("/api/trpc")) {
-    handleTRPC(req, res);
-  } else {
-    honoApp.fetch(req, res);
-  }
+  
+  return c.body(null);
 });
+
+app.route("/api/upload", uploadRouter);
+app.route("/api", uploadRouter);
+app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 if (env.isProduction) {
   const { serveStaticFiles } = await import("./lib/vite");
-  serveStaticFiles(honoApp);
-
-  const port = parseInt(process.env.PORT || "3000");
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
+  serveStaticFiles(app);
 }
 
-export default honoApp;
+serve({
+  fetch: app.fetch,
+  port: parseInt(process.env.PORT || "3000"),
+}, (info) => {
+  console.log(`Server running on http://localhost:${info.port}/`);
+});
+
+export default app;
