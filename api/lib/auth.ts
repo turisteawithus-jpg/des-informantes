@@ -58,8 +58,20 @@ export function clearSessionCookieHeader(): string {
   });
 }
 
-export function getSessionFromRequest(req: Request): SessionPayload | null {
-  const header = req.headers.get("cookie");
+// Fix: funciona con Request (Fetch) y IncomingMessage (Node.js)
+export function getSessionFromRequest(
+  req: Request | { headers: { cookie?: string } }
+): SessionPayload | null {
+  let header: string | undefined;
+
+  if ("headers" in req) {
+    if (typeof (req.headers as any).get === "function") {
+      header = (req.headers as any).get("cookie") || undefined;
+    } else {
+      header = (req.headers as any).cookie;
+    }
+  }
+
   if (!header) return null;
   const cookies = parseCookies(header);
   const token = cookies[SESSION_COOKIE];
