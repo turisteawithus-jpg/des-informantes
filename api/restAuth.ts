@@ -15,6 +15,23 @@ import { sendEmail, verificationEmailHtml } from "./lib/email";
 import { env } from "./lib/env";
 
 const restAuth = new Hono();
+// Endpoints de diagnóstico
+restAuth.get("/ping", (c) => {
+  console.log("[DIAG] GET ping received");
+  return c.json({ ok: true, time: Date.now() });
+});
+
+restAuth.post("/ping", async (c) => {
+  console.log("[DIAG] POST ping received");
+  try {
+    const body = await c.req.json();
+    console.log("[DIAG] body:", JSON.stringify(body));
+    return c.json({ ok: true, received: body });
+  } catch (e: any) {
+    console.log("[DIAG] body parse error:", e.message);
+    return c.json({ error: "parse: " + e.message }, 400);
+  }
+});
 
 // Registro directo (sin tRPC)
 restAuth.post("/register", async (c) => {
