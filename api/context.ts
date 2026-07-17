@@ -1,12 +1,10 @@
-import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type TrpcContext = {
-  req: Request;
-  resHeaders: Headers;
+  req: IncomingMessage;
+  res: ServerResponse;
 };
 
-export async function createContext(
-  opts: FetchCreateContextFnOptions,
-): Promise<TrpcContext> {
-  return { req: opts.req, resHeaders: opts.resHeaders };
+export async function createContext(opts: { req: IncomingMessage; res: ServerResponse }): Promise<TrpcContext> {
+  return { req: opts.req, res: opts.res };
 }
