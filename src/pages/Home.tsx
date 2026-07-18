@@ -4,7 +4,6 @@ import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Mic,
@@ -18,39 +17,68 @@ import {
   Send,
   ArrowRight,
   Newspaper,
+  Loader2,
 } from "lucide-react";
 
 const features = [
   { icon: Globe, title: "Ecosistema digital", desc: "Un espacio online donde equipos crean, conversan y sistematizan su trabajo en mesas organizadas." },
   { icon: Mic, title: "Discusiones con voz", desc: "Cada audio se transcribe automáticamente con IA. Nadie tiene que tomar notas." },
   { icon: MessageSquareText, title: "Texto y audio juntos", desc: "El mismo espacio funciona con mensajes escritos y grabaciones. Todo queda documentado." },
-  { icon: Sparkles, title: "Moderación inteligente", desc: "La IA resume la discusión periódicamente: conclusiones, tareas y ambiente del debate." },
-  { icon: FileText, title: "Relatorías automáticas", desc: "Al cerrar una sesión se genera la relatoría oficial con temas, acuerdos y pendientes." },
+  { icon: Sparkles, title: "Moderacion inteligente", desc: "La IA resume la discusion periodicamente: conclusiones, tareas y ambiente del debate." },
+  { icon: FileText, title: "Relatorias automaticas", desc: "Al cerrar una sesion se genera la relatoria oficial con temas, acuerdos y pendientes." },
   { icon: Map, title: "Mapa de documentos", desc: "Cada documento se conecta por temas. El proceso del proyecto se ve de un vistazo." },
-  { icon: ListChecks, title: "Tareas con seguimiento", desc: "Las tareas nacen de la conversación, se asignan con fechas y se vinculan a sus resultados." },
-  { icon: Users, title: "Mesas de trabajo", desc: "Crea o únete a mesas aprobadas. Cada mesa tiene su administrador y su estructura propia." },
+  { icon: ListChecks, title: "Tareas con seguimiento", desc: "Las tareas nacen de la conversacion, se asignan con fechas y se vinculan a sus resultados." },
+  { icon: Users, title: "Mesas de trabajo", desc: "Crea o unete a mesas aprobadas. Cada mesa tiene su administrador y su estructura propia." },
 ];
 
 export default function Home() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [text, setText] = useState("");
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const messages = trpc.globalChat.list.useQuery(undefined, {
-    refetchInterval: 4000,
-  });
+  async function fetchMessages() {
+    try {
+      const res = await fetch("/api/rest/global-chat");
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(Array.isArray(data) ? data : []);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }
 
-  const send = trpc.globalChat.send.useMutation({
-    onSuccess: () => {
-      setText("");
-      messages.refetch();
-    },
-  });
+  async function sendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/rest/global-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text.trim() }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setText("");
+        fetchMessages();
+      }
+    } catch (e) { console.error(e); }
+    setSending(false);
+  }
+
+  useEffect(() => {
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.data?.length]);
+  }, [messages.length]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -59,7 +87,7 @@ export default function Home() {
       {/* Hero */}
       <section className="di-gradient text-white">
         <div className="max-w-6xl mx-auto px-4 py-16 md:py-20 text-center">
-          <h1 className="font-display text-4xl md:text-6xl mb-4 drop-shadow">Más allá del relato,<br />están los hechos.</h1>
+          <h1 className="font-display text-4xl md:text-6xl mb-4 drop-shadow">Mas alla del relato,<br />estan los hechos.</h1>
           <p className="text-lg md:text-xl max-w-2xl mx-auto opacity-90 mb-4">
             DES Informantes es un <strong>ecosistema de trabajo digital online</strong> donde los equipos conversan, documentan y sistematizan sus proyectos con el apoyo de la inteligencia artificial.
           </p>
@@ -78,28 +106,33 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Chat global público */}
+      {/* Chat global publico */}
       <section className="max-w-4xl mx-auto w-full px-4 -mt-6 relative z-10">
         <Card className="border-2 shadow-xl">
           <div className="bg-primary text-white px-4 py-2.5 rounded-t-lg flex items-center gap-2">
             <MessageSquareText className="h-4 w-4" />
-            <span className="text-sm font-medium">Chat general de DES Informantes — conversación abierta para toda la comunidad</span>
+            <span className="text-sm font-medium">Chat general de DES Informantes — conversacion abierta para toda la comunidad</span>
           </div>
           <CardContent className="p-0">
             <div className="h-[320px] overflow-y-auto p-4 space-y-2 bg-secondary/30">
-              {messages.data?.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-8">Sé el primero en escribir en el chat general.</p>
+              {loading && (
+                <div className="text-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                </div>
               )}
-              {[...(messages.data ?? [])].reverse().map((m) => (
+              {!loading && messages.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">Se el primero en escribir en el chat general.</p>
+              )}
+              {messages.length > 0 && [...messages].reverse().map((m: any) => (
                 <div key={m.id} className="flex gap-2">
                   <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
-                    {m.username[0]?.toUpperCase()}
+                    {m.username?.[0]?.toUpperCase() || "?"}
                   </div>
                   <div className="bg-card border rounded-lg px-3 py-1.5 text-sm max-w-[85%]">
-                    <span className="font-semibold text-xs text-primary">{m.username}</span>
+                    <span className="font-semibold text-xs text-primary">{m.username || "Usuario"}</span>
                     <p className="text-foreground/90">{m.content}</p>
                     <span className="text-[10px] text-muted-foreground">
-                      {new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                      {m.createdAt ? new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : ""}
                     </span>
                   </div>
                 </div>
@@ -107,13 +140,13 @@ export default function Home() {
               <div ref={bottomRef} />
             </div>
             {isAuthenticated ? (
-              <form className="p-3 border-t flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) send.mutate({ content: text.trim() }); }}>
-                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe algo en el chat general…" className="flex-1" />
-                <Button type="submit" size="icon" disabled={send.isPending || !text.trim()}><Send className="h-4 w-4" /></Button>
+              <form className="p-3 border-t flex gap-2" onSubmit={sendMessage}>
+                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe algo en el chat general..." className="flex-1" />
+                <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
               </form>
             ) : (
               <div className="p-3 border-t text-center text-sm text-muted-foreground">
-                <Button variant="link" className="p-0 h-auto" onClick={() => navigate("/login")}>Inicia sesión</Button> para participar en el chat general.
+                <Button variant="link" className="p-0 h-auto" onClick={() => navigate("/login")}>Inicia sesion</Button> para participar en el chat general.
               </div>
             )}
           </CardContent>
@@ -139,15 +172,15 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Cómo funciona */}
+      {/* Como funciona */}
       <section className="di-gradient-soft border-y">
         <div className="max-w-4xl mx-auto px-4 py-16">
-          <h2 className="font-display text-3xl text-center mb-10">Así funciona</h2>
+          <h2 className="font-display text-3xl text-center mb-10">Asi funciona</h2>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { n: "1", t: "Regístrate", d: "Crea tu cuenta con correo y contraseña. Verifica tu correo y entra al ecosistema." },
-              { n: "2", t: "Crea o únete a una mesa", d: "Solicita crear una nueva mesa de trabajo (espera aprobación) o solicita unirte a una mesa existente." },
-              { n: "3", t: "Conversa y sistematiza", d: "Dentro de cada mesa, abre discusiones por voz o texto. La IA transcribe, resume y genera relatorías." },
+              { n: "1", t: "Registrate", d: "Crea tu cuenta con correo y contrasena. Verifica tu correo y entra al ecosistema." },
+              { n: "2", t: "Crea o unete a una mesa", d: "Solicita crear una nueva mesa de trabajo (espera aprobacion) o solicita unirte a una mesa existente." },
+              { n: "3", t: "Conversa y sistematiza", d: "Dentro de cada mesa, abre discusiones por voz o texto. La IA transcribe, resume y genera relatorias." },
             ].map((s) => (
               <div key={s.n} className="text-center">
                 <div className="w-12 h-12 mx-auto rounded-full di-gradient text-white font-display text-2xl flex items-center justify-center mb-3 shadow">{s.n}</div>
