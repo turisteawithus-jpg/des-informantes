@@ -210,5 +210,170 @@ export default function DiscussionRoom() {
           </div>
         </div>
       </div>
+             {/* Panel de moderacion */}
+        {isOpen && isWsAdmin && !modState?.active && (
+          <Card className="border-2 border-amber-400 bg-amber-50/50">
+            <CardContent className="pt-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-5 w-5 text-amber-600" />
+                <div>
+                  <p className="font-medium text-sm">Moderador de IA disponible</p>
+                  <p className="text-xs text-muted-foreground">Activa el moderador para estructurar la discusion en 11 etapas con rondas de palabras.</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={activateModerator} disabled={activating} className="gap-1">
+                {activating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Activar
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
+        {modState?.active && (
+          <Card className="border-2 border-primary/30 bg-primary/5">
+            <CardContent className="pt-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  <div>
+                    <p className="font-medium text-sm flex items-center gap-2">
+                      Moderador activo — 
+                      <span className="text-primary">{PHASE_LABELS[modState.currentPhase] || modState.currentPhase}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Ronda {modState.wordRound} — {modState.interventionsCompleted} de {modState.interventionsRequired} intervenciones
+                    </p>
+                  </div>
+                </div>
+                {isWsAdmin && (
+                  <div className="flex items-center gap-2">
+                    {modState.interventionsCompleted >= modState.interventionsRequired && (
+                      <Badge className="bg-amber-500 text-white animate-pulse">Ronda completa</Badge>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => setShowConclusionForm(!showConclusionForm)}>
+                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> {showConclusionForm ? "Cancelar" : "Concluir etapa"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Barra de progreso */}
+              <div className="w-full bg-muted rounded-full h-2">
+                <div 
+                  className="bg-primary h-2 rounded-full transition-all"
+                  style={{ width: `${Math.min((modState.interventionsCompleted / modState.interventionsRequired) * 100, 100)}%` }}
+                />
+              </div>
+
+              {/* Formulario de conclusion */}
+              {showConclusionForm && isWsAdmin && (
+                <div className="space-y-2 border-t pt-3">
+                  <Input 
+                    placeholder="Titulo de la conclusion..." 
+                    value={conclusionTitle} 
+                    onChange={(e) => setConclusionTitle(e.target.value)} 
+                  />
+                  <textarea 
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px]"
+                    placeholder="Describe la conclusion de esta etapa..."
+                    value={conclusionContent}
+                    onChange={(e) => setConclusionContent(e.target.value)}
+                  />
+                  <Button size="sm" onClick={nextPhase} disabled={advancing} className="w-full">
+                    {advancing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                    Guardar conclusion y avanzar
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Chat de mensajes */}
+        <div className="flex-1 flex flex-col min-h-[40vh] border rounded-xl overflow-hidden">
+          <div className="flex-1 space-y-3 overflow-y-auto p-4 bg-secondary/20">
+            {messages.length === 0 && (
+              <div className="text-center py-10 text-muted-foreground">
+                <MessageSquareText className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">La discusion esta lista. Escribe un mensaje.</p>
+                {modState?.active && <p className="text-xs mt-1">El moderador esta activo. Tus mensajes cuentan como intervenciones.</p>}
+              </div>
+            )}
+            {messages.map((m: any) => {
+              const mine = m.userId === user?.userId;
+              return (
+                <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm ${mine ? "di-gradient text-white" : "bg-card border-2"}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold opacity-90">{m.username}</span>
+                      <span className="text-[10px] opacity-60">{new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    {m.content && <p className="text-sm whitespace-pre-wrap leading-relaxed">{m.content}</p>}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+
+          {isOpen ? (
+            <div className="border-t p-3 bg-card">
+              <form className="flex items-center gap-2" onSubmit={sendMessage}>
+                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1" />
+                <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
+              </form>
+            </div>
+          ) : (
+            <div className="border-t p-3 text-center text-sm text-muted-foreground bg-card">La discusion esta cerrada.</div>
+          )}
+        </div>
+
+        {/* Linea de tiempo con conclusiones */}
+        {conclusions.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="font-display text-lg flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" /> Linea de trabajo — {discussion.title}
+            </h3>
+            <div className="space-y-2">
+              {conclusions.map((c: any, idx: number) => (
+                <Card key={c.id} className={`border-2 ${expandedConclusions.has(c.id) ? 'border-primary/50' : 'border-muted'}`}>
+                  <CardContent className="p-3">
+                    <button 
+                      className="w-full flex items-center justify-between text-left"
+                      onClick={() => toggleConclusion(c.id)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{c.title}</p>
+                          <p className="text-[10px] text-muted-foreground">{PHASE_LABELS[c.phase] || c.phase}</p>
+                        </div>
+                      </div>
+                      {expandedConclusions.has(c.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+                    {expandedConclusions.has(c.id) && (
+                      <div className="mt-3 pt-3 border-t text-sm text-muted-foreground whitespace-pre-wrap pl-11">
+                        {c.content}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Boton cerrar discusion */}
+        {isOpen && isWsAdmin && (
+          <div className="text-center pt-2 pb-4">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={async () => { if (!confirm("Cerrar la discusion permanentemente? Se generara la relatoria final con IA.")) return; try { const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/close`, { method: "POST", credentials: "include" }); if (res.ok) { alert("Discusion cerrada. Relatoria final generada."); fetchDiscussion(); } } catch (e) { console.error(e); } }}>
+              <Lock className="h-3.5 w-3.5 mr-1" /> Cerrar discusion y generar relatoria final
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}      
       <div className="max-w-6xl mx-auto w-full px-4 py-4 space-y-4 flex-1">
