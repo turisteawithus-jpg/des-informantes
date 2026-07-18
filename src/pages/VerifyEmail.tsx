@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { trpc } from "@/providers/trpc";
 import { Loader2, KeyRound } from "lucide-react";
 
 export default function VerifyEmail() {
@@ -15,17 +14,56 @@ export default function VerifyEmail() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
 
-  const verify = trpc.auth.verifyEmail.useMutation({
-    onSuccess: () => navigate("/dashboard"),
-    onError: (e) => setError(e.message),
-  });
-  const resend = trpc.auth.resendCode.useMutation({
-    onSuccess: (data) => {
-      setInfo(data.alreadyVerified ? "Tu correo ya estaba verificado." : data.devMode ? "Código reenviado (míralo en la consola del servidor)." : "Te enviamos un nuevo código.");
-    },
-    onError: (e) => setError(e.message),
-  });
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setVerifying(true);
+    try {
+      const res = await fetch("/api/rest/verify-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Error al verificar");
+      } else {
+        navigate("/dashboard");
+      }
+    } catch {
+      setError("Error de conexion");
+    }
+    setVerifying(false);
+  }
+
+  async function handleResend() {
+    setError("");
+    setInfo("");
+    setResending(true);
+    try {
+      const res = await fetch("/api/rest/resend-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Error al reenviar");
+      } else if (data.alreadyVerified) {
+        setInfo("Tu correo ya estaba verificado.");
+      } else if (data.devMode) {
+        setInfo("Codigo reenviado (mira la consola del servidor).");
+      } else {
+        setInfo("Te enviamos un nuevo codigo. Revisa tu bandeja de entrada.");
+      }
+    } catch {
+      setError("Error de conexion");
+    }
+    setResending(false);
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -35,21 +73,21 @@ export default function VerifyEmail() {
           <CardHeader className="text-center">
             <div className="mx-auto w-14 h-14 rounded-2xl di-gradient flex items-center justify-center mb-2"><KeyRound className="h-7 w-7 text-white" /></div>
             <CardTitle className="font-display text-2xl">Verifica tu correo</CardTitle>
-            <p className="text-sm text-muted-foreground">Enviamos un código de 6 dígitos a <strong>{email}</strong></p>
+            <p className="text-sm text-muted-foreground">Enviamos un codigo de 6 digitos a <strong>{email}</strong></p>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); setError(""); verify.mutate({ email, code }); }}>
+            <form className="space-y-4" onSubmit={handleVerify}>
               <div className="space-y-1.5">
-                <Label>Código de verificación</Label>
+                <Label>Codigo de verificacion</Label>
                 <Input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" className="text-center text-2xl tracking-[0.5em] font-bold" maxLength={6} required />
               </div>
               {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>}
               {info && <p className="text-sm text-primary bg-primary/10 rounded-md px-3 py-2">{info}</p>}
-              <Button type="submit" className="w-full" disabled={verify.isPending || code.length !== 6}>
-                {verify.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Verificando…</> : "Verificar y entrar"}
+              <Button type="submit" className="w-full" disabled={verifying || code.length !== 6}>
+                {verifying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Verificando...</> : "Verificar y entrar"}
               </Button>
-              <Button type="button" variant="ghost" className="w-full" disabled={resend.isPending} onClick={() => { setError(""); setInfo(""); resend.mutate({ email }); }}>
-                No me llegó el código — reenviar
+              <Button type="button" variant="ghost" className="w-full" disabled={resending} onClick={handleResend}>
+                {resending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Reenviando...</> : "No me llego el codigo — reenviar"}
               </Button>
             </form>
           </CardContent>
