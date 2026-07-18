@@ -24,4 +24,5 @@ export const env = {
   appUrl: process.env.APP_URL || "http://localhost:3000",
   gmailUser: process.env.GMAIL_USER || "",
   gmailAppPassword: process.env.GMAIL_APP_PASSWORD || "",
+  groqApiKey: process.env.GROQ_API_KEY || "",
 };
