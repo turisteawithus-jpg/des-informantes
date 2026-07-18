@@ -198,4 +198,46 @@ restAuth.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
+/* ================================================================
+   CHAT GLOBAL PÚBLICO
+   ================================================================ */
+
+// GET /api/rest/global-chat — listar mensajes (público)
+restAuth.get("/global-chat", async (c) => {
+  const db = getDb();
+  const { globalChatMessages, users } = await import("@db/schema");
+  const { desc, eq } = await import("drizzle-orm");
+  const msgs = await db
+    .select({
+      id: globalChatMessages.id,
+      content: globalChatMessages.content,
+      createdAt: globalChatMessages.createdAt,
+      userId: globalChatMessages.userId,
+      username: users.username,
+    })
+    .from(globalChatMessages)
+    .innerJoin(users, eq(globalChatMessages.userId, users.id))
+    .orderBy(desc(globalChatMessages.createdAt))
+    .limit(100);
+  return c.json(msgs);
+});
+
+// POST /api/rest/global-chat — enviar mensaje (requiere auth)
+restAuth.post("/global-chat", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const body = await c.req.json();
+  const content = body.content?.trim();
+  if (!content || content.length < 1 || content.length > 2000) {
+    return c.json({ error: "Mensaje inválido" }, 400);
+  }
+  const db = getDb();
+  const { globalChatMessages } = await import("@db/schema");
+  await db.insert(globalChatMessages).values({
+    userId: user.userId,
+    content,
+  });
+  return c.json({ ok: true });
+});
+
 export default restAuth;
