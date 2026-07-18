@@ -92,8 +92,15 @@ export default function DiscussionRoom() {
               {discussion.description && <p className="text-xs text-muted-foreground truncate">{discussion.description}</p>}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {isOpen ? <Badge className="bg-green-600">En curso</Badge> : <Badge variant="secondary">Cerrada</Badge>}
+                    <div className="flex items-center gap-2">
+            {isOpen ? (
+              <>
+                <Badge className="bg-green-600">En curso</Badge>
+                <Button variant="outline" size="sm" onClick={async () => { if (!confirm("Cerrar la discusion? Se generara la relatoria con IA.")) return; try { const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/close`, { method: "POST", credentials: "include" }); if (res.ok) { alert("Discusion cerrada. Relatoria generada."); fetchDiscussion(); } } catch (e) { console.error(e); } }}>
+                  <Lock className="h-3.5 w-3.5 mr-1" /> Cerrar y generar relatoria
+                </Button>
+              </>
+            ) : <Badge variant="secondary">Cerrada</Badge>}
           </div>
         </div>
       </div>
