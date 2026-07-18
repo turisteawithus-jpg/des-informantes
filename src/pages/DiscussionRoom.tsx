@@ -56,10 +56,13 @@ export default function DiscussionRoom() {
     setSending(false);
   }
 
-  useEffect(() => {
+    useEffect(() => {
     if (!isAuthenticated || !discussionId) return;
-    fetchDiscussion();
-    fetchMessages();
+    async function load() {
+      await Promise.all([fetchDiscussion(), fetchMessages()]);
+      setLoading(false);
+    }
+    load();
     const interval = setInterval(() => { fetchMessages(); fetchDiscussion(); }, 3000);
     return () => clearInterval(interval);
   }, [isAuthenticated, discussionId]);
