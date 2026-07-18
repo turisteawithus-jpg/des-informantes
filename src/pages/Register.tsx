@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { trpc } from "@/providers/trpc";
 import { Loader2, MailCheck } from "lucide-react";
 
 export default function Register() {
@@ -14,11 +13,29 @@ export default function Register() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const register = trpc.auth.register.useMutation({
-    onSuccess: () => navigate(`/verify?email=${encodeURIComponent(email)}`),
-    onError: (e) => setError(e.message),
-  });
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/rest/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Error al registrar");
+      } else {
+        navigate(`/verify?email=${encodeURIComponent(email)}`);
+      }
+    } catch {
+      setError("Error de conexion");
+    }
+    setLoading(false);
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -30,18 +47,18 @@ export default function Register() {
               <MailCheck className="h-7 w-7 text-white" />
             </div>
             <CardTitle className="font-display text-2xl">Crea tu cuenta en DES Informantes</CardTitle>
-            <p className="text-sm text-muted-foreground">Te enviaremos un código de verificación a tu correo.</p>
+            <p className="text-sm text-muted-foreground">Te enviaremos un codigo de verificacion a tu correo.</p>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); setError(""); register.mutate({ email, username, password }); }}>
-              <div className="space-y-1.5"><Label>Nombre de usuario</Label><Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Cómo te verán en las mesas" required /></div>
-              <div className="space-y-1.5"><Label>Correo electrónico</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" required /></div>
-              <div className="space-y-1.5"><Label>Contraseña</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></div>
+            <form className="space-y-4" onSubmit={handleRegister}>
+              <div className="space-y-1.5"><Label>Nombre de usuario</Label><Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Como te veran en las mesas" required /></div>
+              <div className="space-y-1.5"><Label>Correo electronico</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" required /></div>
+              <div className="space-y-1.5"><Label>Contrasena</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimo 8 caracteres" required minLength={8} /></div>
               {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>}
-              <Button type="submit" className="w-full" disabled={register.isPending}>
-                {register.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enviando código…</> : "Registrarme"}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enviando codigo...</> : "Registrarme"}
               </Button>
-              <p className="text-sm text-center text-muted-foreground">¿Ya tienes cuenta? <Link to="/login" className="text-primary font-medium hover:underline">Entra aquí</Link></p>
+              <p className="text-sm text-center text-muted-foreground">Ya tienes cuenta? <Link to="/login" className="text-primary font-medium hover:underline">Entra aqui</Link></p>
             </form>
           </CardContent>
         </Card>
