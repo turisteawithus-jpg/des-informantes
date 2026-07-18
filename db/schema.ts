@@ -79,10 +79,11 @@ export const workspaceJoinRequests = mysqlTable("workspace_join_requests", {
   status: mysqlEnum("status", ["pending", "approved", "rejected"])
     .notNull()
     .default("pending"),
-  reviewedBy: bigint("reviewed_by", { mode: "number", unsigned: true }),
+    reviewedBy: bigint("reviewed_by", { mode: "number", unsigned: true }),
+  message: text("message"),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
-
 /* ------------------------ LÍNEA DE TRABAJO ------------------------ */
 
 export const workspaceTimelineItems = mysqlTable("workspace_timeline_items", {
