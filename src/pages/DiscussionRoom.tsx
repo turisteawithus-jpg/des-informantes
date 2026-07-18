@@ -23,17 +23,20 @@ export default function DiscussionRoom() {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  async function fetchDiscussion() {
+    async function fetchDiscussion() {
     try {
-      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/messages`, { credentials: "include" });
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}`, { credentials: "include" });
       if (res.ok) setDiscussion(await res.json());
     } catch (e) { console.error(e); }
   }
 
   async function fetchMessages() {
     try {
-      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}`, { credentials: "include" });
-      if (res.ok) setMessages(await res.json());
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/messages`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(Array.isArray(data) ? data : []);
+      }
     } catch (e) { console.error(e); }
   }
 
