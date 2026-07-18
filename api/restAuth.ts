@@ -229,7 +229,7 @@ restAuth.post("/global-chat", async (c) => {
   const body = await c.req.json();
   const content = body.content?.trim();
   if (!content || content.length < 1 || content.length > 2000) {
-    return c.json({ error: "Mensaje inválido" }, 400);
+    return c.json({ error: "Mensaje invalido" }, 400);
   }
   const db = getDb();
   const { globalChatMessages } = await import("@db/schema");
@@ -238,6 +238,46 @@ restAuth.post("/global-chat", async (c) => {
     content,
   });
   return c.json({ ok: true });
+});
+
+/* ================================================================
+   REENVIAR CODIGO DE VERIFICACION
+   ================================================================ */
+restAuth.post("/resend-code", async (c) => {
+  try {
+    const body = await c.req.json();
+    const email = body.email?.toLowerCase()?.trim();
+    if (!email) return c.json({ error: "Email requerido" }, 400);
+
+    const db = getDb();
+    const user = await db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
+    if (!user) return c.json({ error: "Usuario no encontrado" }, 404);
+    if (user.emailVerified) return c.json({ ok: true, alreadyVerified: true });
+
+    // Generar nuevo codigo
+    const code = generateVerificationCode();
+
+    // Insertar nuevo codigo
+    await db.insert(emailVerificationCodes).values({
+      userId: user.id,
+      code,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+
+    // Enviar email
+    const result = await sendEmail({
+      to: email,
+      subject: "DES Informantes - Nuevo codigo de verificacion",
+      html: verificationEmailHtml(code, user.username),
+    });
+
+    return c.json({ ok: true, devMode: result.devMode });
+  } catch (e: any) {
+    console.error("[resend-code] Error:", e);
+    return c.json({ error: "Error interno" }, 500);
+  }
 });
 
 export default restAuth;
