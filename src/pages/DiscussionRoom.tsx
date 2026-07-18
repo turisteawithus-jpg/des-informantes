@@ -25,14 +25,14 @@ export default function DiscussionRoom() {
 
   async function fetchDiscussion() {
     try {
-      const res = await fetch(`/api/rest/discussion/${discussionId}`, { credentials: "include" });
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/messages`, { credentials: "include" });
       if (res.ok) setDiscussion(await res.json());
     } catch (e) { console.error(e); }
   }
 
   async function fetchMessages() {
     try {
-      const res = await fetch(`/api/rest/discussion/${discussionId}/messages`, { credentials: "include" });
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}`, { credentials: "include" });
       if (res.ok) setMessages(await res.json());
     } catch (e) { console.error(e); }
   }
@@ -42,7 +42,7 @@ export default function DiscussionRoom() {
     if (!text.trim()) return;
     setSending(true);
     try {
-      const res = await fetch(`/api/rest/discussion/${discussionId}/messages`, {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text.trim() }),
