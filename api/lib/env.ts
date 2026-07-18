@@ -22,7 +22,6 @@ export const env = {
   resendApiKey: process.env.RESEND_API_KEY || "",
   resendFrom: process.env.RESEND_FROM || "TítereHub <onboarding@resend.dev>",
   appUrl: process.env.APP_URL || "http://localhost:3000",
-  gmailUser: process.env.GMAIL_USER || "",
   gmailAppPassword: process.env.GMAIL_APP_PASSWORD || "",
   groqApiKey: process.env.GROQ_API_KEY || "",
 };
