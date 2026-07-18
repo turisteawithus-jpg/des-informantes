@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  Send, Loader2, MessageSquareText, ArrowLeft, Lock,
+    Send, Loader2, MessageSquareText, ArrowLeft, Lock, FileText,
 } from "lucide-react";
 
 export default function DiscussionRoom() {
@@ -21,7 +21,25 @@ export default function DiscussionRoom() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+    const bottomRef = useRef<HTMLDivElement>(null);
+  const [generating, setGenerating] = useState(false);
+  const [lastSummary, setLastSummary] = useState<string | null>(null);
+  const [isWsAdmin, setIsWsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!user || !discussion) return;
+    async function check() {
+      try {
+        const res = await fetch(`/api/rest/workspaces/${discussion.workspaceId}/members`, { credentials: "include" });
+        if (res.ok) {
+          const list = await res.json();
+          const me = list.find((m: any) => m.id === user.userId);
+          setIsWsAdmin(me?.role === "admin" || user.role === "admin");
+        }
+      } catch (e) { console.error(e); }
+    }
+    check();
+  }, [user, discussion]);
 
     async function fetchDiscussion() {
     try {
@@ -92,13 +110,15 @@ export default function DiscussionRoom() {
               {discussion.description && <p className="text-xs text-muted-foreground truncate">{discussion.description}</p>}
             </div>
           </div>
-                    <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2">
             {isOpen ? (
               <>
                 <Badge className="bg-green-600">En curso</Badge>
-                <Button variant="outline" size="sm" onClick={async () => { if (!confirm("Cerrar la discusion? Se generara la relatoria con IA.")) return; try { const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/close`, { method: "POST", credentials: "include" }); if (res.ok) { alert("Discusion cerrada. Relatoria generada."); fetchDiscussion(); } } catch (e) { console.error(e); } }}>
-                  <Lock className="h-3.5 w-3.5 mr-1" /> Cerrar y generar relatoria
-                </Button>
+                {isWsAdmin && (
+                  <Button variant="outline" size="sm" onClick={async () => { if (!confirm("Generar relatoria del avance hasta ahora?")) return; setGenerating(true); try { const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/partial-summary`, { method: "POST", credentials: "include" }); const data = await res.json(); if (res.ok && data.relatoria) { setLastSummary(data.relatoria); } else { alert("No se pudo generar la relatoria."); } } catch (e) { console.error(e); } setGenerating(false); }}>
+                    {generating ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <FileText className="h-3.5 w-3.5 mr-1" />} Relatoria de avance
+                  </Button>
+                )}
               </>
             ) : <Badge variant="secondary">Cerrada</Badge>}
           </div>
@@ -123,6 +143,14 @@ export default function DiscussionRoom() {
               </div>
             );
           })}
+                    {lastSummary && (
+            <Card className="border-2 border-primary/30 bg-primary/5">
+              <CardContent className="pt-4">
+                <h3 className="font-display text-sm mb-2 flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /> Relatoria de avance</h3>
+                <div className="text-sm whitespace-pre-wrap text-muted-foreground max-h-40 overflow-y-auto" dangerouslySetInnerHTML={{ __html: lastSummary.replace(/\n/g, '<br/>') }} />
+              </CardContent>
+            </Card>
+          )}
           <div ref={bottomRef} />
         </div>
 
@@ -133,7 +161,15 @@ export default function DiscussionRoom() {
               <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
             </form>
           </div>
-        ) : <div className="border-t pt-3 text-center text-sm text-muted-foreground">La discusion esta cerrada.</div>}
+                ) : <div className="border-t pt-3 text-center text-sm text-muted-foreground">La discusion esta cerrada.</div>}
+
+        {isOpen && isWsAdmin && (
+          <div className="border-t pt-3 text-center">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={async () => { if (!confirm("Cerrar la discusion permanentemente? Se generara la relatoria final con IA.")) return; try { const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/close`, { method: "POST", credentials: "include" }); if (res.ok) { alert("Discusion cerrada. Relatoria final generada."); fetchDiscussion(); } } catch (e) { console.error(e); } }}>
+              <Lock className="h-3.5 w-3.5 mr-1" /> Cerrar discusion y generar relatoria final
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
