@@ -10,6 +10,7 @@ import {
   summaries,
   discussionModerationStates,
   moderationConclusions,
+  documents,
   privateConversations,
   privateMessages,
   emailVerificationCodes,
@@ -21,6 +22,8 @@ import {
   PHASE_INFO_SERVER,
   generateModeratorConclusion,
   generatePhaseBridge,
+  generateWelcomeBack,
+  generateTopicInfo,
   nextPhaseKeyServer,
 } from "./lib/groqModerator";
 
@@ -825,6 +828,139 @@ restWorkspaces.post("/discussion/:id/raise-hand", async (c) => {
     .set({ handsRaised: JSON.stringify(hands), updatedAt: new Date() })
     .where(eq(discussionModerationStates.discussionId, discId));
   return c.json({ ok: true, raised, handsCount: hands.length });
+});
+
+/* ================================================================ */
+/*   BIENVENIDA DE REINGRESO + INFO DE TEMAS + DOCUMENTOS (IA)      */
+/*   Cache en memoria: se regenera solo cuando cambia el momento    */
+/* ================================================================ */
+const welcomeBackCache = new Map<string, string>();
+const topicInfoCache = new Map<string, string>();
+
+// GET /discussion/:id/welcome-back — la IA recibe al usuario POR SU NOMBRE
+// y lo ubica en el momento actual cuando reingresa a la discusion
+restWorkspaces.get("/discussion/:id/welcome-back", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state) return c.json({ error: "Moderador no activado" }, 404);
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  if (topics.length === 0) return c.json({ error: "Aun no hay temas definidos" }, 404);
+
+  const cacheKey = `${discId}:${user.userId}:${state.currentTopicIndex}:${state.currentPhase}:${state.wordRound}`;
+  const cached = welcomeBackCache.get(cacheKey);
+  if (cached) return c.json({ text: cached });
+
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, disc.workspaceId) });
+  const conclusions = await db.query.moderationConclusions.findMany({
+    where: eq(moderationConclusions.discussionId, discId),
+    orderBy: [asc(moderationConclusions.createdAt)],
+  });
+  const topicConcl = conclusions
+    .filter((cn) => (cn.topicIndex ?? 0) === state.currentTopicIndex)
+    .map((cn) => ({ phaseName: PHASE_INFO_SERVER[cn.phase]?.name ?? cn.phase, title: cn.title }));
+  const phase = PHASE_INFO_SERVER[state.currentPhase] ?? { name: state.currentPhase, objective: "" };
+  const text = await generateWelcomeBack(
+    user.username,
+    ws?.name || "Proyecto",
+    disc.title,
+    topics[state.currentTopicIndex] || "Tema general",
+    phase.name,
+    phase.objective,
+    topicConcl,
+  );
+  if (!text) return c.json({ error: "No se pudo generar la bienvenida" }, 500);
+  welcomeBackCache.set(cacheKey, text);
+  return c.json({ text });
+});
+
+// GET /discussion/:id/topic-info?index=N — block de notas del recuadro principal del tema
+restWorkspaces.get("/discussion/:id/topic-info", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const index = Number(c.req.query("index") ?? 0);
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state) return c.json({ error: "Moderador no activado" }, 404);
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  const title = topics[index];
+  if (!title) return c.json({ error: "Tema no encontrado" }, 404);
+  const cacheKey = `${discId}:${index}:${title}`;
+  const cached = topicInfoCache.get(cacheKey);
+  if (cached) return c.json({ desc: cached });
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  const ws = disc ? await db.query.workspaces.findFirst({ where: eq(workspaces.id, disc.workspaceId) }) : null;
+  const desc = await generateTopicInfo(ws?.name || "Proyecto", disc?.title || "Discusion", title);
+  if (!desc) return c.json({ error: "No se pudo generar la nota" }, 500);
+  topicInfoCache.set(cacheKey, desc);
+  return c.json({ desc });
+});
+
+// GET /discussion/:id/docs — documentos anclados a la linea de tiempo de la discusion
+restWorkspaces.get("/discussion/:id/docs", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const db = getDb();
+  const list = await db.query.documents.findMany({
+    where: eq(documents.discussionId, discId),
+    orderBy: [asc(documents.createdAt)],
+  });
+  return c.json(list);
+});
+
+// POST /discussion/:id/link-doc — anexar un documento por URL (Drive, etc.) a un recuadro
+restWorkspaces.post("/discussion/:id/link-doc", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const title = body.title?.trim();
+  const url = body.url?.trim();
+  if (!title || !url || !/^https?:\/\//i.test(url)) {
+    return c.json({ error: "Faltan datos o el enlace no es valido (debe iniciar con http)" }, 400);
+  }
+  const db = getDb();
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  const [result] = await db.insert(documents).values({
+    workspaceId: disc.workspaceId,
+    discussionId: discId,
+    conclusionId: body.conclusionId ? Number(body.conclusionId) : null,
+    uploadedBy: user.userId,
+    title: title.slice(0, 255),
+    topic: body.topicTitle?.slice(0, 120) || null,
+    fileName: "enlace-externo",
+    fileUrl: url.slice(0, 500),
+    mimeType: "link/externo",
+    sizeBytes: 0,
+  });
+  console.log(`[docs] Discusion ${discId}: documento enlazado "${title}"`);
+  return c.json({ ok: true, documentId: Number(result.insertId) });
+});
+
+// POST /documents/:docId/attach — anclar un documento ya subido al recuadro (momento) correspondiente
+restWorkspaces.post("/documents/:docId/attach", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const docId = Number(c.req.param("docId"));
+  const body = await c.req.json();
+  const db = getDb();
+  await db.update(documents)
+    .set({ conclusionId: body.conclusionId ? Number(body.conclusionId) : null })
+    .where(eq(documents.id, docId));
+  return c.json({ ok: true });
 });
 
 // POST /discussion/:id/topics — cualquier participante puede agregar un tema
