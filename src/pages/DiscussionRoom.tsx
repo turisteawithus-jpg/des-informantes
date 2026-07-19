@@ -10,7 +10,7 @@ import { MarkdownView } from "@/components/MarkdownView";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
-  ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X,
+  ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
 } from "lucide-react";
 
 const PHASE_ORDER = [
@@ -20,26 +20,28 @@ const PHASE_ORDER = [
 ];
 
 const PHASE_INFO: Record<string, { name: string; desc: string }> = {
-  apertura: { name: "Apertura", desc: "Bienvenida. Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
+  apertura: { name: "Apertura", desc: "Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
   contextualizacion: { name: "Contextualizacion", desc: "Se ubica el tema en su contexto: antecedentes, datos y situacion actual del asunto a tratar." },
   comprension: { name: "Comprension", desc: "Cada participante expresa su entendimiento del tema. Se aclaran dudas y terminos." },
-  sintesis_parcial: { name: "Sintesis parcial", desc: "El moderador resume lo dicho hasta ahora y el grupo verifica que todos esten en la misma pagina." },
+  sintesis_parcial: { name: "Sintesis parcial", desc: "Se resume lo dicho hasta ahora y el grupo verifica que todos esten en la misma pagina." },
   profundizacion: { name: "Profundizacion", desc: "Se exploran en detalle los puntos mas importantes o que generan mas debate." },
   coincidencias_diferencias: { name: "Coincidencias y diferencias", desc: "Se identifican abiertamente los acuerdos y desacuerdos entre los participantes." },
   alternativas: { name: "Alternativas", desc: "Se proponen opciones y soluciones para cada punto de discusion sobre la mesa." },
   evaluacion: { name: "Evaluacion", desc: "Se valoran las alternativas propuestas: ventajas, desventajas y viabilidad real." },
   acuerdo: { name: "Acuerdo", desc: "Se construye consenso alrededor de las mejores alternativas disponibles." },
-  conclusion: { name: "Conclusion", desc: "Se formulan las conclusiones finales de la discusion." },
+  conclusion: { name: "Conclusion", desc: "Se formulan las conclusiones finales del tema." },
   compromisos: { name: "Compromisos", desc: "Se definen compromisos concretos, responsables y proximos pasos." },
 };
 
 function phaseName(key: string | undefined) {
   return (key && PHASE_INFO[key]?.name) || "Apertura";
 }
-function nextPhaseKey(key: string | undefined) {
-  const idx = PHASE_ORDER.indexOf(key || "apertura");
-  return PHASE_ORDER[Math.min(idx + 1, PHASE_ORDER.length - 1)];
-}
+
+type Overlay = {
+  kind: "activated" | "topics" | "topic" | "phase" | "finished";
+  phase?: string;
+  prevPhase?: string;
+} | null;
 
 export default function DiscussionRoom() {
   const { id } = useParams<{ id: string }>();
@@ -59,17 +61,19 @@ export default function DiscussionRoom() {
   const [editText, setEditText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Moderador IA
+  // Moderador IA (automatico, por temas)
   const [modState, setModState] = useState<any>(null);
   const [modOpen, setModOpen] = useState(false);
-  const [modTab, setModTab] = useState<"moderador" | "resumenes">("moderador");
-  const [overlay, setOverlay] = useState<{ kind: "activated" | "phase" | "roundComplete"; phase?: string } | null>(null);
-  const [conclusionTitle, setConclusionTitle] = useState("");
-  const [conclusionContent, setConclusionContent] = useState("");
-  const [advancing, setAdvancing] = useState(false);
+  const [modTab, setModTab] = useState<"relatoria" | "resumenes">("relatoria");
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [addingTopic, setAddingTopic] = useState(false);
+  const [newTopic, setNewTopic] = useState("");
+  const [savingTopic, setSavingTopic] = useState(false);
+  const prevTopicsCountRef = useRef<number | null>(null);
+  const prevTopicIdxRef = useRef<number | null>(null);
   const prevPhaseRef = useRef<string | null>(null);
-  const prevRoundCompleteRef = useRef(false);
+  const prevActiveRef = useRef<boolean>(false);
 
   // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -156,24 +160,52 @@ export default function DiscussionRoom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  // Detectar cambio de fase -> anuncio grande para todos
+  // Deteccion de transiciones del moderador automatico
   const currentPhase: string | undefined = modState?.state?.currentPhase;
-  useEffect(() => {
-    if (!currentPhase || !modState?.state?.active) { prevPhaseRef.current = currentPhase ?? null; return; }
-    if (prevPhaseRef.current && prevPhaseRef.current !== currentPhase) {
-      setOverlay({ kind: "phase", phase: currentPhase });
-    }
-    prevPhaseRef.current = currentPhase;
-  }, [currentPhase, modState?.state?.active]);
+  const modActiveNow = !!modState?.state?.active;
+  const topicsList: string[] = modState?.state?.topics ?? [];
+  const topicIdx: number = modState?.state?.currentTopicIndex ?? 0;
 
-  // Detectar ronda completada -> el anuncio le sale a CUALQUIER participante
-  const roundComplete = !!(modState?.state?.active && modState.state.interventionsCompleted >= modState.state.interventionsRequired);
   useEffect(() => {
-    if (roundComplete && !prevRoundCompleteRef.current) {
-      setOverlay({ kind: "roundComplete", phase: modState.state.currentPhase });
+    if (!modState?.state) return;
+    if (!modActiveNow) {
+      prevTopicsCountRef.current = topicsList.length;
+      prevTopicIdxRef.current = topicIdx;
+      prevPhaseRef.current = currentPhase ?? null;
+      return;
     }
-    prevRoundCompleteRef.current = roundComplete;
-  }, [roundComplete]);
+    // 1. Se acaban de definir los temas (primera ronda completada)
+    if (prevTopicsCountRef.current === 0 && topicsList.length > 0) {
+      setOverlay({ kind: "topics" });
+    }
+    // 2. Se concluyo un tema y arranca el siguiente
+    else if (
+      topicsList.length > 0 &&
+      prevTopicIdxRef.current !== null &&
+      topicIdx !== prevTopicIdxRef.current
+    ) {
+      setOverlay({ kind: "topic", phase: currentPhase });
+    }
+    // 3. Cambio de fase dentro del mismo tema
+    else if (
+      topicsList.length > 0 &&
+      prevPhaseRef.current &&
+      prevPhaseRef.current !== currentPhase
+    ) {
+      setOverlay({ kind: "phase", phase: currentPhase, prevPhase: prevPhaseRef.current });
+    }
+    prevTopicsCountRef.current = topicsList.length;
+    prevTopicIdxRef.current = topicIdx;
+    prevPhaseRef.current = currentPhase ?? null;
+  }, [currentPhase, topicIdx, topicsList.length, modActiveNow]);
+
+  // Cuando el moderador termina todos los temas
+  useEffect(() => {
+    if (prevActiveRef.current && !modActiveNow && (modState?.conclusions?.length ?? 0) > 0) {
+      setOverlay({ kind: "finished" });
+    }
+    prevActiveRef.current = modActiveNow;
+  }, [modActiveNow]);
 
   async function sendTextMsg(e: React.FormEvent) {
     e.preventDefault();
@@ -207,6 +239,7 @@ export default function DiscussionRoom() {
       if (res.ok) {
         await fetchDiscussion();
         await fetchRelatoria();
+        setOverlay(null);
       }
     } catch (e) { console.error(e); }
     setClosing(false);
@@ -256,32 +289,28 @@ export default function DiscussionRoom() {
       });
       if (res.ok) {
         await fetchModState();
-        setOverlay({ kind: "activated", phase: "apertura" });
+        setOverlay({ kind: "activated" });
       }
     } catch (e) { console.error(e); }
   }
 
-  async function advancePhase() {
-    if (!conclusionTitle.trim() || !conclusionContent.trim()) return;
-    setAdvancing(true);
+  async function addTopic() {
+    if (!newTopic.trim() || savingTopic) return;
+    setSavingTopic(true);
     try {
-      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/next-phase`, {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/topics`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conclusionTitle: conclusionTitle.trim(),
-          conclusionContent: conclusionContent.trim(),
-        }),
+        body: JSON.stringify({ title: newTopic.trim() }),
         credentials: "include",
       });
       if (res.ok) {
-        setConclusionTitle("");
-        setConclusionContent("");
-        setOverlay(null);
+        setNewTopic("");
+        setAddingTopic(false);
         await fetchModState();
       }
     } catch (e) { console.error(e); }
-    setAdvancing(false);
+    setSavingTopic(false);
   }
 
   async function generatePartialSummary() {
@@ -306,22 +335,19 @@ export default function DiscussionRoom() {
 
   const pinnedMessages = messages.filter((m) => m.pinned);
   const normalMessages = messages.filter((m) => !m.pinned);
-  const modActive = !!modState?.state?.active;
   const interventionsCompleted = modState?.state?.interventionsCompleted ?? 0;
   const interventionsRequired = modState?.state?.interventionsRequired ?? 5;
   const progressPct = Math.min(100, Math.round((interventionsCompleted / Math.max(1, interventionsRequired)) * 100));
+  const roundComplete = modActiveNow && interventionsCompleted >= interventionsRequired;
   const conclusions: any[] = modState?.conclusions ?? [];
-
-  const overlayTitle =
-    overlay?.kind === "activated" ? "Moderador activado"
-    : overlay?.kind === "roundComplete" ? "Ronda de palabras completada"
-    : `Fase: ${phaseName(overlay?.phase)}`;
-  const overlayDesc =
-    overlay?.kind === "activated"
-      ? `La discusion comienza en la fase de ${phaseName("apertura")}. ${PHASE_INFO.apertura.desc}`
-    : overlay?.kind === "roundComplete"
-      ? `Se alcanzo el numero de intervenciones de la fase "${phaseName(overlay?.phase)}". Cualquier participante puede registrar la conclusion de la fase y avanzar, o seguir conversando.`
-    : PHASE_INFO[overlay?.phase ?? ""]?.desc ?? "";
+  const lastConclusion = conclusions.length > 0 ? conclusions[conclusions.length - 1] : null;
+  // La relatoria en proceso muestra SOLO las conclusiones del tema actual (se reinicia por tema)
+  const topicConclusions = conclusions.filter((cn) => (cn.topicIndex ?? 0) === topicIdx);
+  const selectingTopics = modActiveNow && topicsList.length === 0;
+  const phaseIdx = Math.max(0, PHASE_ORDER.indexOf(currentPhase ?? "apertura"));
+  const topicProgressPct = topicsList.length > 0
+    ? Math.min(100, Math.round(((topicIdx + phaseIdx / PHASE_ORDER.length) / topicsList.length) * 100))
+    : 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -349,6 +375,42 @@ export default function DiscussionRoom() {
           </div>
         </div>
       </div>
+
+      {/* Barra de progreso de temas */}
+      {topicsList.length > 0 && (
+        <div className="border-b bg-card">
+          <div className="max-w-4xl mx-auto px-4 py-2 flex items-center gap-3">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              Tema {Math.min(topicIdx + 1, topicsList.length)} de {topicsList.length}:{" "}
+              <strong className="text-foreground">{topicsList[topicIdx]}</strong>
+            </span>
+            <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+              <div className="h-2 di-gradient rounded-full transition-all" style={{ width: `${topicProgressPct}%` }} />
+            </div>
+            <span className="text-[10px] text-muted-foreground">{topicProgressPct}%</span>
+            {isOpen && (
+              <Button size="sm" variant="ghost" className="text-xs gap-1 h-7" onClick={() => setAddingTopic(!addingTopic)}>
+                <Plus className="h-3.5 w-3.5" /> Tema
+              </Button>
+            )}
+          </div>
+          {addingTopic && (
+            <div className="max-w-4xl mx-auto px-4 pb-2 flex gap-2">
+              <Input
+                value={newTopic}
+                onChange={(e) => setNewTopic(e.target.value)}
+                placeholder="Titulo del nuevo tema..."
+                className="h-8 text-sm"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } }}
+                autoFocus
+              />
+              <Button size="sm" className="h-8" onClick={addTopic} disabled={!newTopic.trim() || savingTopic}>
+                {savingTopic ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Agregar"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-4">
         <div className="flex flex-col min-h-[60vh]">
@@ -450,7 +512,7 @@ export default function DiscussionRoom() {
           {isOpen ? (
             <div className="border-t pt-3">
               <form className="flex items-center gap-2" onSubmit={sendTextMsg}>
-                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1" />
+                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={selectingTopics ? "Propone un tema para la discusion..." : "Escribe un mensaje..."} className="flex-1" />
                 <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
               </form>
             </div>
@@ -478,22 +540,22 @@ export default function DiscussionRoom() {
         )}
       </div>
 
-      {/* Widget flotante: Moderador IA + Resumenes */}
+      {/* Ventana flotante: Relatoria en proceso (conclusiones del tema actual) */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
         {modOpen && (
-          <Card className="w-80 border-2 shadow-2xl">
+          <Card className="w-96 border-2 shadow-2xl">
             <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center justify-between rounded-t-xl">
-              <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Moderacion IA</span>
+              <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Relatoria en proceso</span>
               <button onClick={() => setModOpen(false)} className="text-white/80 hover:text-white" title="Cerrar panel"><X className="h-4 w-4" /></button>
             </div>
             <div className="flex border-b text-xs">
-              <button onClick={() => setModTab("moderador")} className={`flex-1 py-2 font-medium ${modTab === "moderador" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Moderador</button>
-              <button onClick={() => setModTab("resumenes")} className={`flex-1 py-2 font-medium ${modTab === "resumenes" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Resumenes IA</button>
+              <button onClick={() => setModTab("relatoria")} className={`flex-1 py-2 font-medium ${modTab === "relatoria" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Conclusiones IA</button>
+              <button onClick={() => setModTab("resumenes")} className={`flex-1 py-2 font-medium ${modTab === "resumenes" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Resumenes</button>
             </div>
-            <CardContent className="pt-3 space-y-3 max-h-[50vh] overflow-y-auto">
+            <CardContent className="pt-3 space-y-3 max-h-[55vh] overflow-y-auto">
               {modTab === "resumenes" ? (
                 <>
-                  {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes que la IA genera de la discusion: conclusiones, tareas y ambiente.</p>}
+                  {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes parciales que la IA genera de la discusion.</p>}
                   {summaries.map((s) => (
                     <div key={s.id} className="border rounded-lg p-2.5 bg-secondary/40">
                       <p className="text-[10px] text-muted-foreground mb-1">
@@ -506,47 +568,78 @@ export default function DiscussionRoom() {
                     {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
                   </Button>
                 </>
-              ) : !modActive ? (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    El moderador guia la discusion por fases (apertura, contextualizacion, acuerdos, compromisos...) con rondas de palabras: cuenta las intervenciones y avisa cuando es momento de avanzar.
-                  </p>
-                  <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
-                    <Sparkles className="h-3.5 w-3.5" /> Activar moderador
-                  </Button>
-                </>
               ) : (
                 <>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Fase actual</p>
-                    <p className="font-display text-lg leading-tight">{phaseName(currentPhase)}</p>
-                    <p className="text-xs text-muted-foreground">{PHASE_INFO[currentPhase ?? ""]?.desc}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs">Ronda de palabras: <strong>{interventionsCompleted} de {interventionsRequired}</strong> intervenciones</p>
-                    <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                      <div className="h-2 di-gradient rounded-full transition-all" style={{ width: `${progressPct}%` }} />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">Ronda #{modState.state.wordRound}</p>
-                  </div>
-                  <div className="space-y-2 pt-1">
-                    <Button size="sm" className="w-full" onClick={() => setOverlay({ kind: "roundComplete", phase: currentPhase })}>
-                      Avanzar a: {phaseName(nextPhaseKey(currentPhase))}
-                    </Button>
-                    <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
-                      {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
-                    </Button>
-                  </div>
-                  {conclusions.length > 0 && (
-                    <div className="space-y-1.5 pt-1">
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Conclusiones por fase</p>
-                      {conclusions.map((cn) => (
-                        <div key={cn.id} className="text-xs border rounded-lg p-2 bg-secondary/40">
-                          <p className="font-semibold">{cn.title}</p>
-                          <p className="text-muted-foreground">{cn.content}</p>
+                  {!modState ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        El Moderador IA guia la discusion automaticamente. Primero organiza los temas que ustedes propongan y luego genera la conclusion de cada fase. Aqui se van guardando las conclusiones del tema en curso.
+                      </p>
+                      <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
+                        <Sparkles className="h-3.5 w-3.5" /> Activar moderador
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {modActiveNow && (
+                        <div className="border rounded-lg p-2.5 bg-secondary/40">
+                          {selectingTopics ? (
+                            <>
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Momento actual</p>
+                              <p className="font-display text-base leading-tight">Seleccion de temas</p>
+                              {roundComplete ? (
+                                <p className="text-xs text-primary flex items-center gap-1.5 mt-1">
+                                  <Loader2 className="h-3 w-3 animate-spin" /> La IA esta organizando los temas propuestos...
+                                </p>
+                              ) : (
+                                <p className="text-xs mt-1">Propuestas: <strong>{interventionsCompleted} de {interventionsRequired}</strong></p>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Tema {topicIdx + 1}/{topicsList.length} · Fase actual
+                              </p>
+                              <p className="font-display text-base leading-tight">{phaseName(currentPhase)}</p>
+                              {roundComplete ? (
+                                <p className="text-xs text-primary flex items-center gap-1.5 mt-1">
+                                  <Loader2 className="h-3 w-3 animate-spin" /> La IA esta redactando la conclusion...
+                                </p>
+                              ) : (
+                                <>
+                                  <p className="text-xs mt-1">Ronda de palabras: <strong>{interventionsCompleted} de {interventionsRequired}</strong></p>
+                                  <div className="h-1.5 bg-secondary rounded-full overflow-hidden mt-1">
+                                    <div className="h-1.5 di-gradient rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                                  </div>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {!modActiveNow && conclusions.length > 0 && (
+                        <div className="border rounded-lg p-2.5 bg-green-50 border-green-300">
+                          <p className="text-xs text-green-800 font-medium">El moderador concluyo todos los temas. La memoria completa esta guardada.</p>
+                        </div>
+                      )}
+                      {topicsList.length > 0 && (
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Conclusiones del tema actual: {topicsList[topicIdx]}
+                        </p>
+                      )}
+                      {topicConclusions.length === 0 && modActiveNow && (
+                        <p className="text-xs text-muted-foreground">Cuando la IA concluya la primera fase de este tema, la conclusion aparecera aqui.</p>
+                      )}
+                      {topicConclusions.map((cn) => (
+                        <div key={cn.id} className="border rounded-lg p-2.5 bg-card">
+                          <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
+                          <p className="font-semibold text-sm leading-tight">{cn.title}</p>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            <MarkdownView content={cn.content} />
+                          </div>
                         </div>
                       ))}
-                    </div>
+                    </>
                   )}
                 </>
               )}
@@ -555,51 +648,115 @@ export default function DiscussionRoom() {
         )}
         <Button onClick={() => setModOpen(!modOpen)} className={`rounded-full shadow-lg gap-2 di-gradient text-white ${roundComplete ? "animate-pulse" : ""}`}>
           <Sparkles className="h-4 w-4" />
-          {modActive ? `Moderador: ${phaseName(currentPhase)}` : "Moderador IA"}
-          {modActive && (
+          {!modState ? "Moderador IA"
+            : roundComplete ? "La IA esta trabajando..."
+            : selectingTopics ? `Seleccion de temas`
+            : modActiveNow ? `Tema ${topicIdx + 1}/${topicsList.length}: ${phaseName(currentPhase)}`
+            : "Relatoria en proceso"}
+          {modActiveNow && !roundComplete && (
             <span className="text-[10px] bg-white/25 rounded-full px-2 py-0.5">{interventionsCompleted}/{interventionsRequired}</span>
           )}
+          {modActiveNow && roundComplete && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         </Button>
       </div>
 
-      {/* Anuncio grande del moderador (estilo videojuego) */}
+      {/* Anuncios grandes del Moderador IA */}
       {overlay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <Card className="max-w-lg w-full border-2 shadow-2xl">
-            <div className="di-gradient px-6 py-5 text-white rounded-t-xl text-center">
-              <Sparkles className="h-9 w-9 mx-auto mb-2" />
-              <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">Moderador IA</p>
-              <h2 className="font-display text-3xl leading-tight">{overlayTitle}</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
+          <Card className="max-w-2xl w-full border-2 shadow-2xl">
+            <div className="di-gradient px-6 py-6 text-white rounded-t-xl text-center">
+              <Sparkles className="h-10 w-10 mx-auto mb-2" />
+              <p className="text-[11px] uppercase tracking-[0.25em] opacity-85">Moderador IA</p>
+              <h2 className="font-display text-4xl leading-tight font-bold">
+                {overlay.kind === "activated" && "Seleccion de temas"}
+                {overlay.kind === "topics" && "Temas de la discusion"}
+                {overlay.kind === "topic" && `Tema ${topicIdx + 1}: ${topicsList[topicIdx] ?? ""}`}
+                {overlay.kind === "phase" && `Fase: ${phaseName(overlay.phase)}`}
+                {overlay.kind === "finished" && "Moderacion finalizada"}
+              </h2>
             </div>
-            <CardContent className="pt-5 space-y-4">
-              <p className="text-center text-sm text-muted-foreground leading-relaxed">{overlayDesc}</p>
-              {overlay.kind === "roundComplete" ? (
-                <div className="space-y-3">
-                  <Input
-                    placeholder="Titulo de la conclusion de esta fase"
-                    value={conclusionTitle}
-                    onChange={(e) => setConclusionTitle(e.target.value)}
-                  />
-                  <Textarea
-                    placeholder="Conclusion de esta fase (obligatoria para avanzar)"
-                    value={conclusionContent}
-                    onChange={(e) => setConclusionContent(e.target.value)}
-                    rows={3}
-                  />
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1" onClick={() => setOverlay(null)}>Seguir conversando</Button>
-                    <Button
-                      className="flex-1 di-gradient text-white"
-                      disabled={advancing || !conclusionTitle.trim() || !conclusionContent.trim()}
-                      onClick={advancePhase}
-                    >
-                      {advancing ? <Loader2 className="h-4 w-4 animate-spin" /> : `Avanzar a: ${phaseName(nextPhaseKey(overlay.phase))}`}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button className="w-full di-gradient text-white" onClick={() => setOverlay(null)}>Continuar</Button>
+            <CardContent className="pt-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              {overlay.kind === "activated" && (
+                <p className="text-center text-sm text-muted-foreground leading-relaxed">
+                  Iniciamos con la <strong>seleccion de los temas</strong> de la discusion. En esta primera ronda de palabras, cada participante puede <strong>proponer los temas</strong> que quiere tratar.
+                  <br /><br />Cuando la ronda termine, la IA organizara los temas propuestos y comenzaremos con el primero.
+                </p>
               )}
+              {overlay.kind === "topics" && (
+                <>
+                  <p className="text-center text-sm text-muted-foreground">La IA organizo los temas propuestos por los participantes:</p>
+                  <ol className="space-y-1.5">
+                    {topicsList.map((t, i) => (
+                      <li key={i} className="flex items-center gap-2.5 border rounded-lg px-3 py-2 bg-secondary/40">
+                        <span className="w-6 h-6 rounded-full di-gradient text-white text-xs flex items-center justify-center shrink-0">{i + 1}</span>
+                        <span className="text-sm font-medium">{t}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="text-center text-sm leading-relaxed">
+                    Comenzamos con el <strong>Tema 1: {topicsList[0]}</strong>. Recuerda que puedes agregar mas temas con el boton <strong>"+ Tema"</strong> en cualquier momento.
+                  </p>
+                </>
+              )}
+              {overlay.kind === "topic" && (
+                <>
+                  {lastConclusion && (
+                    <div className="border rounded-lg p-3 bg-secondary/40">
+                      <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1">
+                        El tema anterior concluyo con: {lastConclusion.title}
+                      </p>
+                      <div className="text-sm text-muted-foreground">
+                        <MarkdownView content={lastConclusion.content} />
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-center text-sm leading-relaxed">
+                    Abrimos un nuevo tema. La <strong>Relatoria en proceso</strong> se reinicia: ahora se llenara con las conclusiones de este tema.
+                  </p>
+                </>
+              )}
+              {overlay.kind === "phase" && (
+                <>
+                  {lastConclusion && (
+                    <div className="border rounded-lg p-3 bg-secondary/40">
+                      <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1">
+                        Conclusion de la fase {phaseName(overlay.prevPhase)}: {lastConclusion.title}
+                      </p>
+                      <div className="text-sm text-muted-foreground">
+                        <MarkdownView content={lastConclusion.content} />
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-center text-sm leading-relaxed">
+                    <strong>Siguiente momento:</strong> {PHASE_INFO[overlay.phase ?? ""]?.desc}
+                  </p>
+                </>
+              )}
+              {overlay.kind === "finished" && (
+                <>
+                  <p className="text-center text-sm text-muted-foreground leading-relaxed">
+                    El Moderador IA concluyo todos los temas y fases de la discusion. Toda la memoria del proceso quedo guardada.
+                  </p>
+                  {lastConclusion && (
+                    <div className="border rounded-lg p-3 bg-secondary/40">
+                      <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1">
+                        Ultima conclusion: {lastConclusion.title}
+                      </p>
+                      <div className="text-sm text-muted-foreground">
+                        <MarkdownView content={lastConclusion.content} />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="flex gap-2">
+                <Button className="flex-1 di-gradient text-white" onClick={() => setOverlay(null)}>Continuar</Button>
+                {overlay.kind === "finished" && canModerate && isOpen && (
+                  <Button className="flex-1" variant="outline" disabled={closing} onClick={closeDisc}>
+                    {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cerrar y generar relatoria"}
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
