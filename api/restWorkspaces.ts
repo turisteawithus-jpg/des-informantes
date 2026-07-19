@@ -16,6 +16,7 @@ import {
 } from "@db/schema";
 import { and, desc, eq, or, asc, count } from "drizzle-orm";
 import { getSessionFromRequest } from "./lib/auth";
+import { PHASE_ORDER_SERVER, PHASE_INFO_SERVER } from "./lib/groqModerator";
 
 const restWorkspaces = new Hono();
 function getUser(c: any) {
@@ -489,6 +490,56 @@ restWorkspaces.get("/:id/discussions", async (c) => {
     orderBy: [desc(discussions.createdAt)],
   });
   return c.json(list);
+});
+
+// GET /:id/discussions-progress — progreso del moderador IA por discusion
+// (alimenta las barras de carga de las tarjetas de discusion en la mesa)
+restWorkspaces.get("/:id/discussions-progress", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const wsId = Number(c.req.param("id"));
+  const db = getDb();
+  const discs = await db.query.discussions.findMany({
+    where: eq(discussions.workspaceId, wsId),
+  });
+  const result: any[] = [];
+  for (const d of discs) {
+    const st = await db.query.discussionModerationStates.findFirst({
+      where: eq(discussionModerationStates.discussionId, d.id),
+    });
+    if (!st) {
+      result.push({
+        discussionId: d.id, started: false, active: false, finished: false,
+        topicsCount: 0, currentTopicIndex: 0, currentPhase: null,
+        phaseName: null, currentTopic: null, progress: 0,
+      });
+      continue;
+    }
+    let topics: string[] = [];
+    try { topics = st.topics ? JSON.parse(st.topics) : []; } catch { topics = []; }
+    const totalPhases = PHASE_ORDER_SERVER.length;
+    const phaseIdx = Math.max(0, PHASE_ORDER_SERVER.indexOf(st.currentPhase as any));
+    // El motor solo desactiva el moderador cuando concluye el ultimo tema
+    const finished = !st.active && topics.length > 0;
+    const progress = topics.length === 0
+      ? 0
+      : finished
+        ? 1
+        : Math.min(1, (st.currentTopicIndex + phaseIdx / totalPhases) / topics.length);
+    result.push({
+      discussionId: d.id,
+      started: true,
+      active: !!st.active,
+      finished,
+      topicsCount: topics.length,
+      currentTopicIndex: st.currentTopicIndex,
+      currentPhase: st.currentPhase,
+      phaseName: PHASE_INFO_SERVER[st.currentPhase]?.name ?? st.currentPhase,
+      currentTopic: topics[st.currentTopicIndex] ?? null,
+      progress,
+    });
+  }
+  return c.json(result);
 });
 
 // POST /:id/discussions — crear discusion

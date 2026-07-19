@@ -126,10 +126,29 @@ async function processCompletedRounds() {
         let topics: string[] = [];
         try { topics = st.topics ? JSON.parse(st.topics) : []; } catch { topics = []; }
 
-        // RONDA DE SELECCION DE TEMAS: la IA extrae y organiza los temas propuestos
+        // RONDA DE PROPUESTA DE TEMAS: los temas los definen LOS PARTICIPANTES.
+        // La IA SOLO extrae y organiza lo que ellos propusieron; nunca inventa temas.
         if (topics.length === 0) {
           const aiTopics = await generateTopicList(ws?.name || "Proyecto", disc.title, msgs);
-          const finalTopics = (aiTopics && aiTopics.length > 0 ? aiTopics : ["Tema general"]).slice(0, 8);
+          if (!aiTopics || aiTopics.length === 0) {
+            // Nadie ha propuesto temas todavia (o error tecnico): abre una nueva
+            // ronda de palabras y sigue esperando propuestas de los participantes.
+            await db
+              .update(discussionModerationStates)
+              .set({
+                interventionsCompleted: 0,
+                wordRound: st.wordRound + 1,
+                updatedAt: new Date(),
+              })
+              .where(eq(discussionModerationStates.discussionId, st.discussionId));
+            console.log(
+              aiTopics === null
+                ? `[moderador] Discusion ${st.discussionId}: error tecnico al extraer temas, se reintentara en la proxima ronda`
+                : `[moderador] Discusion ${st.discussionId}: aun no hay temas propuestos por los participantes, esperando nueva ronda`,
+            );
+            continue;
+          }
+          const finalTopics = aiTopics.slice(0, 8);
           await db
             .update(discussionModerationStates)
             .set({
@@ -141,7 +160,7 @@ async function processCompletedRounds() {
               updatedAt: new Date(),
             })
             .where(eq(discussionModerationStates.discussionId, st.discussionId));
-          console.log(`[moderador] Discusion ${st.discussionId}: ${finalTopics.length} temas definidos por la IA`);
+          console.log(`[moderador] Discusion ${st.discussionId}: ${finalTopics.length} temas extraidos de las propuestas de los participantes`);
           continue;
         }
 
