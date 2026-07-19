@@ -69,6 +69,52 @@ function splitCommitments(content: string): {
   return { main, commitments };
 }
 
+// Vista previa del recuadro secundario: el ANALISIS de lo que se discutio
+// (cuerpo de las secciones de la conclusion, sin los titulos de seccion)
+function sectionSnippet(content: string, max = 140): string {
+  const { main } = splitCommitments(content);
+  const body = main
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"))
+    .join(" ")
+    .replace(/[#*>`]/g, "")
+    .trim();
+  return body.slice(0, max);
+}
+
+// Tarjeta de documento en linea dentro del chat: cualquier usuario la abre
+function DocMessageCard({
+  content,
+  mine,
+  onOpen,
+}: {
+  content: string;
+  mine: boolean;
+  onOpen: (id: number, title: string) => void;
+}) {
+  const match = content.match(/\[\[doc:(\d+)\]\]\s*([\s\S]*)/);
+  if (!match) return <p className="text-sm whitespace-pre-wrap leading-relaxed">{content}</p>;
+  const docTitle = (match[2] || "Documento en linea").trim();
+  return (
+    <button
+      onClick={() => onOpen(Number(match[1]), docTitle)}
+      className={`flex items-center gap-2.5 rounded-xl border-2 border-dashed px-3 py-2.5 text-left transition-colors min-w-[260px] ${
+        mine
+          ? "border-white/60 bg-white/10 hover:bg-white/20 text-white"
+          : "border-primary/50 bg-primary/5 hover:border-primary"
+      }`}
+    >
+      <FilePenLine className="h-6 w-6 shrink-0" />
+      <span>
+        <span className="block text-[10px] uppercase tracking-wide opacity-80">Documento en linea · editable por todos</span>
+        <span className="block text-sm font-semibold leading-tight">{docTitle}</span>
+        <span className="block text-[10px] opacity-70 mt-0.5">Toca para abrirlo y editarlo en tiempo real</span>
+      </span>
+    </button>
+  );
+}
+
 type Overlay = {
   kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision" | "waiting" | "welcomeback";
   phase?: string;
@@ -575,6 +621,14 @@ export default function DiscussionRoom() {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         await fetchDocs();
+        // El documento nace como un mensaje del chat: cualquier usuario lo abre tocandolo
+        await fetch(`/api/rest/workspaces/discussion/${discussionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: `📄 [[doc:${data.documentId}]] ${newDocTitle.trim()}` }),
+          credentials: "include",
+        });
+        fetchMessages();
         setEditorDoc({ id: data.documentId, title: newDocTitle.trim() });
         setNewDocOpen(false);
         setNewDocTitle("");
@@ -744,10 +798,14 @@ export default function DiscussionRoom() {
                         </div>
                       </div>
                     ) : m.content ? (
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                        {m.type === "audio" && <span className="text-[10px] uppercase opacity-60 block mb-0.5">Transcripcion</span>}
-                        {m.content}
-                      </p>
+                      m.content.includes("[[doc:") ? (
+                        <DocMessageCard content={m.content} mine={mine} onOpen={(id, t) => setEditorDoc({ id, title: t })} />
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                          {m.type === "audio" && <span className="text-[10px] uppercase opacity-60 block mb-0.5">Transcripcion</span>}
+                          {m.content}
+                        </p>
+                      )
                     ) : null}
                   </div>
                 </div>
@@ -827,8 +885,8 @@ export default function DiscussionRoom() {
                     </div>
                     {/* Recuadros secundarios: uno por cada momento concluido del tema */}
                     {expanded && topicConcl.map((cn) => {
-                      const { main, commitments } = splitCommitments(cn.content || "");
-                      const snippet = main.replace(/[#*>`]/g, "").trim().slice(0, 140);
+                      const { commitments } = splitCommitments(cn.content || "");
+                      const snippet = sectionSnippet(cn.content || "");
                       const momentDocs = topicDocs.filter((d) => d.conclusionId === cn.id);
                       return (
                         <Fragment key={cn.id}>
@@ -1483,7 +1541,7 @@ export default function DiscussionRoom() {
 
       {/* Editor de documentos en linea (se abre dentro de la plataforma) */}
       {editorDoc && (
-        <DocEditor docId={editorDoc.id} title={editorDoc.title} onClose={() => setEditorDoc(null)} />
+        <DocEditor docId={editorDoc.id} title={editorDoc.title} username={user?.username ?? "Participante"} onClose={() => setEditorDoc(null)} />
       )}
     </div>
   );
