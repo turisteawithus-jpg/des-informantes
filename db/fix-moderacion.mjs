@@ -62,6 +62,9 @@ console.log("OK: tabla discussion_moderation_states lista");
 // 2b. Columna bridge_text: contexto que la IA redacta para abrir cada nuevo momento
 await ensureColumn("discussion_moderation_states", "bridge_text", "text");
 
+// 2c. Columna hands_raised: manos levantadas (JSON con ids de usuario) durante la pausa de decision
+await ensureColumn("discussion_moderation_states", "hands_raised", "text");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (
