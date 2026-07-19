@@ -11,20 +11,14 @@ import restWorkspaces from "./restWorkspaces";
 import { getDb } from "./queries/connection";
 import {
   discussionModerationStates,
-  moderationConclusions,
   discussionMessages,
   discussions,
   users,
   workspaces,
+  workspaceMembers,
 } from "@db/schema";
 import { eq, asc } from "drizzle-orm";
-import {
-  generateModeratorConclusion,
-  generateTopicList,
-  nextPhaseKeyServer,
-  PHASE_ORDER_SERVER,
-  PHASE_INFO_SERVER,
-} from "./lib/groqModerator";
+import { generateTopicList } from "./lib/groqModerator";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -67,13 +61,15 @@ if (env.isProduction) {
 }
 
 /* ================================================================
-   MOTOR DEL MODERADOR IA (automatico)
-   Cada 12 segundos revisa las discusiones con moderador activo.
-   Cuando una ronda de palabras se completa:
-     1. La IA genera la conclusion objetiva de la fase.
-     2. La guarda en el historial (alimenta la relatoria en proceso).
-     3. Avanza automaticamente a la siguiente fase.
-   El frontend detecta el cambio y muestra el anuncio grande.
+   MOTOR DEL MODERADOR IA
+   Cada 12 segundos revisa las discusiones con moderador activo:
+   - En la ronda de propuesta de temas, extrae SOLO los temas que
+     los participantes escribieron (nunca inventa).
+   - Aplica la regla vigente de intervenciones por ronda
+     (minimo 5; 50% de los miembros desde 12).
+   Cuando una ronda de fases se completa, el motor NO avanza solo:
+   el moderador (persona) decide en la app si hay otra ronda o si
+   se abre el siguiente momento, y el anuncio le llega a TODOS.
    ================================================================ */
 const processingModeration = new Set<number>();
 
@@ -95,6 +91,32 @@ async function processCompletedRounds() {
         });
         if (!disc) continue;
 
+        // Regla de rondas vigente: minimo 5 intervenciones; 50% de los miembros
+        // solo cuando la mesa tiene 12 o mas. Se aplica sola a discusiones ya activas.
+        const memberRows = await db
+          .select()
+          .from(workspaceMembers)
+          .where(eq(workspaceMembers.workspaceId, disc.workspaceId));
+        const requiredNow = memberRows.length >= 12 ? Math.ceil(memberRows.length / 2) : 5;
+        if (requiredNow !== st.interventionsRequired) {
+          await db
+            .update(discussionModerationStates)
+            .set({ interventionsRequired: requiredNow, updatedAt: new Date() })
+            .where(eq(discussionModerationStates.discussionId, st.discussionId));
+          console.log(`[moderador] Discusion ${st.discussionId}: ronda ajustada a ${requiredNow} intervenciones (${memberRows.length} miembros)`);
+          if (st.interventionsCompleted < requiredNow) continue;
+        }
+
+        let topics: string[] = [];
+        try { topics = st.topics ? JSON.parse(st.topics) : []; } catch { topics = []; }
+
+        // Si ya hay temas definidos y la ronda se completo, el motor NO avanza solo:
+        // queda en pausa hasta que el moderador (persona) decida en la app si hay
+        // otra ronda de palabras o si se abre el siguiente momento.
+        if (topics.length > 0) continue;
+
+        // RONDA DE PROPUESTA DE TEMAS: los temas los definen LOS PARTICIPANTES.
+        // La IA SOLO extrae y organiza lo que ellos propusieron; nunca inventa temas.
         const rows = await db
           .select({
             userId: discussionMessages.userId,
@@ -123,108 +145,39 @@ async function processCompletedRounds() {
           where: eq(workspaces.id, disc.workspaceId),
         });
 
-        let topics: string[] = [];
-        try { topics = st.topics ? JSON.parse(st.topics) : []; } catch { topics = []; }
-
-        // RONDA DE PROPUESTA DE TEMAS: los temas los definen LOS PARTICIPANTES.
-        // La IA SOLO extrae y organiza lo que ellos propusieron; nunca inventa temas.
-        if (topics.length === 0) {
-          const aiTopics = await generateTopicList(ws?.name || "Proyecto", disc.title, msgs);
-          if (!aiTopics || aiTopics.length === 0) {
-            // Nadie ha propuesto temas todavia (o error tecnico): abre una nueva
-            // ronda de palabras y sigue esperando propuestas de los participantes.
-            await db
-              .update(discussionModerationStates)
-              .set({
-                interventionsCompleted: 0,
-                wordRound: st.wordRound + 1,
-                updatedAt: new Date(),
-              })
-              .where(eq(discussionModerationStates.discussionId, st.discussionId));
-            console.log(
-              aiTopics === null
-                ? `[moderador] Discusion ${st.discussionId}: error tecnico al extraer temas, se reintentara en la proxima ronda`
-                : `[moderador] Discusion ${st.discussionId}: aun no hay temas propuestos por los participantes, esperando nueva ronda`,
-            );
-            continue;
-          }
-          const finalTopics = aiTopics.slice(0, 8);
+        const aiTopics = await generateTopicList(ws?.name || "Proyecto", disc.title, msgs);
+        if (!aiTopics || aiTopics.length === 0) {
+          // Nadie ha propuesto temas todavia (o error tecnico): abre una nueva
+          // ronda de palabras y sigue esperando propuestas de los participantes.
           await db
             .update(discussionModerationStates)
             .set({
-              topics: JSON.stringify(finalTopics),
-              currentTopicIndex: 0,
-              currentPhase: "apertura",
-              interventionsCompleted: 0,
-              wordRound: st.wordRound + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(discussionModerationStates.discussionId, st.discussionId));
-          console.log(`[moderador] Discusion ${st.discussionId}: ${finalTopics.length} temas extraidos de las propuestas de los participantes`);
-          continue;
-        }
-
-        // RONDA DE FASE dentro del tema actual: la IA genera la conclusion
-        const topicTitle = topics[st.currentTopicIndex] || "Tema general";
-        const conclusion = await generateModeratorConclusion(
-          ws?.name || "Proyecto",
-          disc.title,
-          st.currentPhase,
-          topicTitle,
-          msgs,
-        );
-
-        await db.insert(moderationConclusions).values({
-          discussionId: st.discussionId,
-          phase: st.currentPhase,
-          topicIndex: st.currentTopicIndex,
-          title:
-            conclusion?.title ||
-            `Conclusion de la fase ${PHASE_INFO_SERVER[st.currentPhase]?.name ?? st.currentPhase}`,
-          content:
-            conclusion?.content ||
-            "La IA no pudo generar la conclusion en este momento. El moderador reintentara en la proxima ronda.",
-        });
-
-        const isLastPhase =
-          PHASE_ORDER_SERVER.indexOf(st.currentPhase as any) ===
-          PHASE_ORDER_SERVER.length - 1;
-        const hasMoreTopics = st.currentTopicIndex + 1 < topics.length;
-
-        if (isLastPhase && hasMoreTopics) {
-          // Tema concluido: pasa al siguiente tema, la relatoria en proceso se reinicia
-          await db
-            .update(discussionModerationStates)
-            .set({
-              currentTopicIndex: st.currentTopicIndex + 1,
-              currentPhase: "apertura",
-              interventionsCompleted: 0,
-              wordRound: st.wordRound + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(discussionModerationStates.discussionId, st.discussionId));
-          console.log(`[moderador] Discusion ${st.discussionId}: tema ${st.currentTopicIndex + 1} concluido, avanza al tema ${st.currentTopicIndex + 2}`);
-        } else if (isLastPhase && !hasMoreTopics) {
-          // Ultimo tema concluido: el moderador termina su labor
-          await db
-            .update(discussionModerationStates)
-            .set({ active: false, updatedAt: new Date() })
-            .where(eq(discussionModerationStates.discussionId, st.discussionId));
-          console.log(`[moderador] Discusion ${st.discussionId}: moderacion finalizada`);
-        } else {
-          await db
-            .update(discussionModerationStates)
-            .set({
-              currentPhase: nextPhaseKeyServer(st.currentPhase) as any,
               interventionsCompleted: 0,
               wordRound: st.wordRound + 1,
               updatedAt: new Date(),
             })
             .where(eq(discussionModerationStates.discussionId, st.discussionId));
           console.log(
-            `[moderador] Discusion ${st.discussionId}: fase ${st.currentPhase} concluida, avanza automaticamente`,
+            aiTopics === null
+              ? `[moderador] Discusion ${st.discussionId}: error tecnico al extraer temas, se reintentara en la proxima ronda`
+              : `[moderador] Discusion ${st.discussionId}: aun no hay temas propuestos por los participantes, esperando nueva ronda`,
           );
+          continue;
         }
+        const finalTopics = aiTopics.slice(0, 8);
+        await db
+          .update(discussionModerationStates)
+          .set({
+            topics: JSON.stringify(finalTopics),
+            currentTopicIndex: 0,
+            currentPhase: "apertura",
+            interventionsCompleted: 0,
+            wordRound: st.wordRound + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(discussionModerationStates.discussionId, st.discussionId));
+        console.log(`[moderador] Discusion ${st.discussionId}: ${finalTopics.length} temas extraidos de las propuestas de los participantes`);
+        continue;
       } finally {
         processingModeration.delete(st.discussionId);
       }

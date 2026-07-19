@@ -16,7 +16,13 @@ import {
 } from "@db/schema";
 import { and, desc, eq, or, asc, count } from "drizzle-orm";
 import { getSessionFromRequest } from "./lib/auth";
-import { PHASE_ORDER_SERVER, PHASE_INFO_SERVER } from "./lib/groqModerator";
+import {
+  PHASE_ORDER_SERVER,
+  PHASE_INFO_SERVER,
+  generateModeratorConclusion,
+  generatePhaseBridge,
+  nextPhaseKeyServer,
+} from "./lib/groqModerator";
 
 const restWorkspaces = new Hono();
 function getUser(c: any) {
@@ -809,21 +815,23 @@ restWorkspaces.post("/discussion/:id/activate-moderator", async (c) => {
   const db = getDb();
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
-  // Cualquier participante autenticado puede activar el moderador
+  // Cualquier participante autenticado puede activar el moderador.
+  // Regla de rondas de palabras: MINIMO 5 intervenciones por ronda;
+  // la regla del 50% de los miembros aplica solo cuando la mesa tiene 12 o mas.
+  const members = await db.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, disc.workspaceId));
+  const interventionsRequired = members.length >= 12 ? Math.ceil(members.length / 2) : 5;
   const existing = await db.query.discussionModerationStates.findFirst({
     where: eq(discussionModerationStates.discussionId, discId),
   });
   if (existing) {
     await db.update(discussionModerationStates)
-      .set({ active: true, updatedAt: new Date() })
+      .set({ active: true, interventionsRequired, updatedAt: new Date() })
       .where(eq(discussionModerationStates.discussionId, discId));
-    return c.json({ ok: true, message: "Moderador reactivado" });
+    return c.json({ ok: true, message: "Moderador reactivado", interventionsRequired });
   }
-  const members = await db.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, disc.workspaceId));
-  const interventionsRequired = Math.ceil(members.length / 2);
   await db.insert(discussionModerationStates).values({
     discussionId: discId,
-    interventionsRequired: interventionsRequired > 0 ? interventionsRequired : 5,
+    interventionsRequired,
     active: true,
     activatedBy: user.userId,
     activatedAt: new Date(),
@@ -870,6 +878,160 @@ restWorkspaces.post("/discussion/:id/next-phase", async (c) => {
     updatedAt: new Date(),
   }).where(eq(discussionModerationStates.discussionId, discId));
   return c.json({ ok: true, nextPhase: phases[nextIdx], isLast: nextIdx === phases.length - 1 });
+});
+
+// Quien puede decidir el rumbo de la moderacion: quien activo el moderador,
+// un admin de la mesa o el admin general
+async function canDecideModeration(db: any, user: any, state: any, workspaceId: number): Promise<boolean> {
+  if (user.role === "admin") return true;
+  if (state.activatedBy && state.activatedBy === user.userId) return true;
+  const member = await db.query.workspaceMembers.findFirst({
+    where: and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, user.userId)),
+  });
+  return member?.role === "admin";
+}
+
+// POST /discussion/:id/next-round — el moderador (persona) decide OTRA ronda de palabras
+restWorkspaces.post("/discussion/:id/next-round", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state || !state.active) return c.json({ error: "Moderador no activo" }, 400);
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await canDecideModeration(db, user, state, disc.workspaceId))) {
+    return c.json({ error: "Solo el moderador puede decidir el siguiente paso" }, 403);
+  }
+  await db.update(discussionModerationStates).set({
+    interventionsCompleted: 0,
+    wordRound: state.wordRound + 1,
+    updatedAt: new Date(),
+  }).where(eq(discussionModerationStates.discussionId, discId));
+  console.log(`[moderador] Discusion ${discId}: el moderador pidio OTRA ronda de palabras`);
+  return c.json({ ok: true });
+});
+
+// POST /discussion/:id/advance-phase — el moderador (persona) decide AVANZAR:
+// la IA cierra el momento actual con su conclusion y redacta el contexto del siguiente
+restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state || !state.active) return c.json({ error: "Moderador no activo" }, 400);
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await canDecideModeration(db, user, state, disc.workspaceId))) {
+    return c.json({ error: "Solo el moderador puede decidir el siguiente paso" }, 403);
+  }
+
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  if (topics.length === 0) return c.json({ error: "Aun no hay temas definidos" }, 400);
+
+  // Transcripcion reciente para el analisis de la IA
+  const rows = await db
+    .select({
+      userId: discussionMessages.userId,
+      type: discussionMessages.type,
+      content: discussionMessages.content,
+    })
+    .from(discussionMessages)
+    .where(eq(discussionMessages.discussionId, discId))
+    .orderBy(asc(discussionMessages.createdAt))
+    .limit(120);
+  const nameMap = new Map<number, string>();
+  for (const uid of [...new Set(rows.map((r) => r.userId))]) {
+    const u = await db.query.users.findFirst({ where: eq(users.id, uid) });
+    if (u) nameMap.set(uid, u.username);
+  }
+  const msgs = rows
+    .filter((r) => r.content)
+    .map((r) => ({
+      username: nameMap.get(r.userId) || "Participante",
+      type: r.type,
+      content: r.content || "",
+    }));
+  const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.id, disc.workspaceId) });
+
+  const topicTitle = topics[state.currentTopicIndex] || "Tema general";
+  const prevPhaseKey = state.currentPhase;
+  const prevPhaseName = PHASE_INFO_SERVER[prevPhaseKey]?.name ?? prevPhaseKey;
+
+  // 1. La IA cierra el momento que termina (analisis practico: ideas, acuerdos,
+  //    diferencias y compromisos SOLO si realmente existen)
+  const conclusion = await generateModeratorConclusion(
+    ws?.name || "Proyecto",
+    disc.title,
+    prevPhaseKey,
+    topicTitle,
+    msgs,
+  );
+  await db.insert(moderationConclusions).values({
+    discussionId: discId,
+    phase: prevPhaseKey,
+    topicIndex: state.currentTopicIndex,
+    title: conclusion?.title || `Conclusion de la fase ${prevPhaseName}`,
+    content: conclusion?.content || "La IA no pudo generar la conclusion en este momento.",
+  });
+
+  // 2. Calcular el siguiente momento (otra fase, otro tema o el cierre)
+  const isLastPhase =
+    PHASE_ORDER_SERVER.indexOf(prevPhaseKey as any) === PHASE_ORDER_SERVER.length - 1;
+  const hasMoreTopics = state.currentTopicIndex + 1 < topics.length;
+  const updates: any = {
+    interventionsCompleted: 0,
+    wordRound: state.wordRound + 1,
+    updatedAt: new Date(),
+  };
+  let nextPhaseName: string | null = null;
+  let nextObjective = "";
+  let nextTopicTitle = topicTitle;
+  if (isLastPhase && hasMoreTopics) {
+    updates.currentTopicIndex = state.currentTopicIndex + 1;
+    updates.currentPhase = "apertura";
+    nextPhaseName = PHASE_INFO_SERVER.apertura.name;
+    nextObjective = PHASE_INFO_SERVER.apertura.objective;
+    nextTopicTitle = topics[state.currentTopicIndex + 1];
+  } else if (isLastPhase && !hasMoreTopics) {
+    updates.active = false;
+    updates.bridgeText = null;
+  } else {
+    const nk = nextPhaseKeyServer(prevPhaseKey);
+    updates.currentPhase = nk;
+    nextPhaseName = PHASE_INFO_SERVER[nk]?.name ?? nk;
+    nextObjective = PHASE_INFO_SERVER[nk]?.objective ?? "";
+  }
+
+  // 3. La IA redacta el contexto de apertura del nuevo momento (lenguaje de moderacion)
+  if (nextPhaseName) {
+    const bridge = await generatePhaseBridge(
+      ws?.name || "Proyecto",
+      disc.title,
+      nextTopicTitle,
+      prevPhaseName,
+      nextPhaseName,
+      nextObjective,
+      conclusion?.content ?? null,
+    );
+    updates.bridgeText = bridge ?? null;
+  }
+
+  await db.update(discussionModerationStates).set(updates)
+    .where(eq(discussionModerationStates.discussionId, discId));
+  console.log(
+    updates.active === false
+      ? `[moderador] Discusion ${discId}: el moderador cerro el ultimo momento, moderacion finalizada`
+      : `[moderador] Discusion ${discId}: el moderador abrio un nuevo momento`,
+  );
+  return c.json({ ok: true, finished: updates.active === false });
 });
 
 // POST /discussion/:id/intervention — registrar intervencion en ronda de palabras
