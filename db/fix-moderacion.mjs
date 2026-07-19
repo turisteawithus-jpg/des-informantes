@@ -71,6 +71,9 @@ await ensureColumn("documents", "conclusion_id", "bigint unsigned NULL");
 // 2e. Columna content en documents: contenido de los documentos editables en linea
 await ensureColumn("documents", "content", "text");
 
+// 2f. Columna yjs_state en documents: estado binario (base64) de la edicion en vivo
+await ensureColumn("documents", "yjs_state", "mediumtext");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (

@@ -243,6 +243,7 @@ export const documents = mysqlTable("documents", {
   taskId: bigint("task_id", { mode: "number", unsigned: true }),
   conclusionId: bigint("conclusion_id", { mode: "number", unsigned: true }),
   content: text("content"),
+  yjsState: text("yjs_state"),
   uploadedBy: bigint("uploaded_by", { mode: "number", unsigned: true }).notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   topic: varchar("topic", { length: 120 }),
