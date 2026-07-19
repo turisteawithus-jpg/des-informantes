@@ -38,6 +38,7 @@ export const globalChatMessages = mysqlTable("global_chat_messages", {
   id: serial("id").primaryKey(),
   userId: bigint("user_id", { mode: "number", unsigned: true }).notNull(),
   content: text("content").notNull(),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -96,6 +97,7 @@ export const workspaceTimelineItems = mysqlTable("workspace_timeline_items", {
     .notNull()
     .default("none"),
   linkId: bigint("link_id", { mode: "number", unsigned: true }),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -129,6 +131,7 @@ export const discussionMessages = mysqlTable("discussion_messages", {
   ])
     .notNull()
     .default("none"),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -143,9 +146,48 @@ export const summaries = mysqlTable("summaries", {
     .default("partial"),
   content: text("content").notNull(),
   messageCount: int("message_count").notNull().default(0),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 /* ----------------------- CHATS PRIVADOS ----------------------- */
+
+/* ----------------------- MODERACION ----------------------- */
+
+export const discussionModerationStates = mysqlTable("discussion_moderation_states", {
+  id: serial("id").primaryKey(),
+  discussionId: bigint("discussion_id", { mode: "number", unsigned: true }).notNull().unique(),
+  currentPhase: mysqlEnum("current_phase", [
+    "apertura", "contextualizacion", "comprension", "sintesis_parcial",
+    "profundizacion", "coincidencias_diferencias", "alternativas",
+    "evaluacion", "acuerdo", "conclusion", "compromisos"
+  ]).notNull().default("apertura"),
+  topics: text("topics"),
+  currentTopicIndex: int("current_topic_index").notNull().default(0),
+  wordRound: int("word_round").notNull().default(1),
+  interventionsRequired: int("interventions_required").notNull().default(5),
+  interventionsCompleted: int("interventions_completed").notNull().default(0),
+  active: boolean("active").notNull().default(false),
+  activatedBy: bigint("activated_by", { mode: "number", unsigned: true }),
+  activatedAt: timestamp("activated_at"),
+  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
+
+export const moderationConclusions = mysqlTable("moderation_conclusions", {
+  id: serial("id").primaryKey(),
+  discussionId: bigint("discussion_id", { mode: "number", unsigned: true }).notNull(),
+  phase: mysqlEnum("phase", [
+    "apertura", "contextualizacion", "comprension", "sintesis_parcial",
+    "profundizacion", "coincidencias_diferencias", "alternativas",
+    "evaluacion", "acuerdo", "conclusion", "compromisos"
+  ]).notNull(),
+  topicIndex: int("topic_index").notNull().default(0),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  pinned: boolean("pinned").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const privateConversations = mysqlTable(
   "private_conversations",
@@ -165,6 +207,7 @@ export const privateMessages = mysqlTable("private_messages", {
   senderId: bigint("sender_id", { mode: "number", unsigned: true }).notNull(),
   content: text("content").notNull(),
   read: boolean("read").notNull().default(false),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 /* ------------------------------- TAREAS ------------------------------- */
@@ -184,6 +227,7 @@ export const tasks = mysqlTable("tasks", {
     mode: "number",
     unsigned: true,
   }),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
@@ -202,5 +246,6 @@ export const documents = mysqlTable("documents", {
   fileUrl: varchar("file_url", { length: 500 }).notNull(),
   mimeType: varchar("mime_type", { length: 120 }),
   sizeBytes: int("size_bytes").notNull().default(0),
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
