@@ -130,6 +130,7 @@ restAuth.post("/login", async (c) => {
     });
 
     c.header("Set-Cookie", sessionCookieHeader(token));
+    console.log("[login] Sesion creada para:", emailLower);
     return c.json({ ok: true, role: user.role, username: user.username });
 
   } catch (e: any) {
@@ -178,6 +179,7 @@ restAuth.post("/verify-email", async (c) => {
     });
 
     c.header("Set-Cookie", sessionCookieHeader(token));
+    console.log("[verify] Correo verificado y sesion creada para:", emailLower);
     return c.json({ ok: true, role: user.role });
 
   } catch (e: any) {

@@ -562,7 +562,21 @@ restWorkspaces.post("/:id/discussions", async (c) => {
     description: description || null,
     createdBy: user.userId,
   });
-  return c.json({ discussionId: Number(result.insertId) });
+  const discussionId = Number(result.insertId);
+  // El Moderador IA se activa SOLO al abrir la discusion:
+  // da la bienvenida y desde el primer momento cuenta la ronda de palabras
+  // para recoger los temas que los participantes propondran.
+  const members = await db.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, wsId));
+  const interventionsRequired = members.length >= 12 ? Math.ceil(members.length / 2) : 5;
+  await db.insert(discussionModerationStates).values({
+    discussionId,
+    interventionsRequired,
+    active: true,
+    activatedBy: user.userId,
+    activatedAt: new Date(),
+  });
+  console.log(`[moderador] Discusion ${discussionId}: moderador activado automaticamente al abrir la discusion`);
+  return c.json({ discussionId, moderatorActive: true });
 });
 
 // GET /discussion/:id — obtener una discusion
@@ -782,7 +796,35 @@ restWorkspaces.get("/discussion/:id/moderation-state", async (c) => {
   });
   let topics: string[] = [];
   try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
-  return c.json({ state: { ...state, topics }, conclusions });
+  let hands: number[] = [];
+  try { hands = state.handsRaised ? JSON.parse(state.handsRaised) : []; } catch { hands = []; }
+  return c.json({ state: { ...state, topics, handsRaised: hands, handsCount: hands.length }, conclusions });
+});
+
+// POST /discussion/:id/raise-hand — levantar o bajar la mano (pedir la palabra)
+restWorkspaces.post("/discussion/:id/raise-hand", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state || !state.active) return c.json({ error: "Moderador no activo" }, 400);
+  let hands: number[] = [];
+  try { hands = state.handsRaised ? JSON.parse(state.handsRaised) : []; } catch { hands = []; }
+  let raised: boolean;
+  if (hands.includes(user.userId)) {
+    hands = hands.filter((id) => id !== user.userId);
+    raised = false;
+  } else {
+    hands.push(user.userId);
+    raised = true;
+  }
+  await db.update(discussionModerationStates)
+    .set({ handsRaised: JSON.stringify(hands), updatedAt: new Date() })
+    .where(eq(discussionModerationStates.discussionId, discId));
+  return c.json({ ok: true, raised, handsCount: hands.length });
 });
 
 // POST /discussion/:id/topics — cualquier participante puede agregar un tema
@@ -825,7 +867,7 @@ restWorkspaces.post("/discussion/:id/activate-moderator", async (c) => {
   });
   if (existing) {
     await db.update(discussionModerationStates)
-      .set({ active: true, interventionsRequired, updatedAt: new Date() })
+      .set({ active: true, interventionsRequired, handsRaised: "[]", updatedAt: new Date() })
       .where(eq(discussionModerationStates.discussionId, discId));
     return c.json({ ok: true, message: "Moderador reactivado", interventionsRequired });
   }
@@ -909,6 +951,7 @@ restWorkspaces.post("/discussion/:id/next-round", async (c) => {
   await db.update(discussionModerationStates).set({
     interventionsCompleted: 0,
     wordRound: state.wordRound + 1,
+    handsRaised: "[]",
     updatedAt: new Date(),
   }).where(eq(discussionModerationStates.discussionId, discId));
   console.log(`[moderador] Discusion ${discId}: el moderador pidio OTRA ronda de palabras`);
@@ -989,6 +1032,7 @@ restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
   const updates: any = {
     interventionsCompleted: 0,
     wordRound: state.wordRound + 1,
+    handsRaised: "[]",
     updatedAt: new Date(),
   };
   let nextPhaseName: string | null = null;
