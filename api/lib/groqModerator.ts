@@ -207,18 +207,27 @@ Responde SOLO con el parrafo, nada mas.`;
 }
 
 /**
- * Block de notas del recuadro principal de un tema: explica brevemente
- * que es la tematica y sus implicaciones para la discusion. ~60 palabras.
+ * Block de notas del recuadro principal de un tema CONCLUIDO: resume en
+ * que quedo el tema a partir de los titulos de las conclusiones de sus
+ * momentos. ~60 palabras. (Mientras el tema esta en curso o pendiente,
+ * el recuadro principal solo muestra el nombre del tema.)
  */
 export async function generateTopicInfo(
   workspaceName: string,
   discussionTitle: string,
   topicTitle: string,
+  conclusionTitles: string[],
 ): Promise<string | null> {
   if (!env.groqApiKey) return null;
-  const prompt = `Eres el Moderador IA de DES Informantes. En la discusion "${discussionTitle}" (mesa "${workspaceName}") los participantes definieron el tema: "${topicTitle}".
+  const history = conclusionTitles.length > 0
+    ? conclusionTitles.map((t) => `- ${t}`).join("\n")
+    : "(sin conclusiones registradas)";
+  const prompt = `Eres el Moderador IA de DES Informantes. En la discusion "${discussionTitle}" (mesa "${workspaceName}") el grupo ya CONCLUYO el tema: "${topicTitle}".
 
-Redacta en espanol una nota breve (maximo 60 palabras, UN solo parrafo, sin Markdown) que explique que es este tema y por que importa tratarlo en esta discusion. Tono claro y profesional. Responde SOLO con el parrafo.`;
+Estas fueron las conclusiones de sus momentos:
+${history}
+
+Redacta en espanol una nota breve (maximo 60 palabras, UN solo parrafo, sin Markdown) que describa en que quedo este tema: de que se hablo y a que se llego. Tono claro y profesional. No menciones compromisos salvo que los titulos los evidencien. Responde SOLO con el parrafo.`;
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -276,6 +285,8 @@ Si alguna de esas cuatro secciones no aplica, escribe "Sin elementos registrados
 
 REGLA ESPECIAL DE COMPROMISOS: solo si los participantes asumieron compromisos CONCRETOS en esta fase (accion definida, idealmente con responsable), agrega al final una quinta seccion:
 ## Compromisos asumidos
+Cada compromiso se escribe en su propia linea con EXACTAMENTE este formato (para que la plataforma pueda leerlo):
+- <texto del compromiso> | Responsable: <nombre del participante o "Por definir"> | Fecha: <fecha acordada o "Sin fecha">
 Si NO hubo compromisos reales, OMITE esa seccion por completo: no la menciones, no escribas "sin compromisos" ni nada parecido. La mayoria de las fases no tienen compromisos.
 
 Tono profesional, objetivo y conciso.`;
