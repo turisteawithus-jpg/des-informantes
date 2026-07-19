@@ -23,6 +23,15 @@ export async function sendEmail({
   subject,
   html,
 }: SendEmailParams): Promise<{ ok: boolean; devMode: boolean }> {
+  console.log(
+    `[email] Canal de envio: ${
+      gmailTransporter
+        ? `Gmail SMTP (${env.gmailUser})`
+        : env.resendApiKey
+          ? `Resend (from: ${env.resendFrom})`
+          : "MODO DESARROLLO (no sale ningun correo real)"
+    } -> ${to}`,
+  );
   // Si no hay Gmail configurado, usar Resend como fallback, o modo desarrollo
   if (!gmailTransporter) {
     // Intentar Resend como fallback

@@ -32,7 +32,9 @@ export function nextPhaseKeyServer(key: string): string {
  * No opina ni participa: sintetiza ideas, acuerdos, diferencias y recomendaciones.
  */
 /**
- * Extrae y organiza los temas propuestos por los usuarios en la primera ronda.
+ * Extrae y organiza SOLO los temas propuestos por los usuarios en la primera ronda.
+ * NUNCA inventa temas: si nadie propuso nada claro, devuelve [] (array vacio).
+ * Devuelve null solo si hubo error tecnico (sin API key, fallo de red, etc).
  */
 export async function generateTopicList(
   workspaceName: string,
@@ -44,18 +46,27 @@ export async function generateTopicList(
   const transcript = recent
     .map((m) => `${m.username}${m.type === "audio" ? " (audio)" : ""}: ${m.content}`)
     .join("\n");
-  const prompt = `Eres el Moderador IA de DES Informantes. La discusion "${discussionTitle}" (mesa "${workspaceName}") tuvo su primera ronda de palabras, en la que los participantes propusieron los TEMAS que quieren tratar.
+  const prompt = `Eres el Moderador IA de DES Informantes. La discusion "${discussionTitle}" (mesa "${workspaceName}") esta en su primera ronda de palabras, en la que los PARTICIPANTES proponen los TEMAS que quieren tratar.
 
 Transcripcion:
 ${transcript}
 
-Tu tarea: extrae y organiza la lista de temas propuestos por los participantes. Redacta cada tema como un titulo corto y claro (maximo 8 palabras). Maximo 8 temas. Ordenalos de forma logica para el desarrollo de la discusion.
+Tu UNICA tarea: extraer los temas que los participantes propusieron explicitamente en sus mensajes.
+
+REGLAS ESTRICTAS:
+- NO inventes temas. NO agregues nada que nadie haya mencionado.
+- NO deduzcas temas a partir del titulo de la discusion.
+- NO propongas temas por tu cuenta: tu solo organizas lo que los participantes pidieron.
+- Redacta cada tema como un titulo corto y claro (maximo 8 palabras), fiel a lo propuesto.
+- Si varios mensajes proponen lo mismo, unificalos en un solo tema.
+- Maximo 8 temas, ordenados de forma logica para el desarrollo de la discusion.
 
 Responde SOLO con la lista numerada, una linea por tema, sin texto adicional:
 1. ...
 2. ...
 
-Si no se propusieron temas claros, responde con UN solo tema general derivado del titulo de la discusion.`;
+Si NADIE propuso un tema claro en la transcripcion, responde EXACTAMENTE con esta unica linea:
+SIN_TEMAS`;
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -72,12 +83,14 @@ Si no se propusieron temas claros, responde con UN solo tema general derivado de
     const data = await res.json();
     const text: string = data.choices?.[0]?.message?.content || "";
     if (!text) return null;
+    // La IA no encontro temas propuestos por los participantes: array vacio (no es error)
+    if (/^\s*SIN_TEMAS/i.test(text)) return [];
     const topics = text
       .split("\n")
       .map((line) => line.replace(/^\s*\d+[.)\-]\s*/, "").trim())
-      .filter((line) => line.length > 0 && line.length <= 150)
+      .filter((line) => line.length > 0 && line.length <= 150 && !/^SIN_TEMAS/i.test(line))
       .slice(0, 8);
-    return topics.length > 0 ? topics : null;
+    return topics;
   } catch (e: any) {
     console.error("[groq-temas] Error:", e.message);
     return null;
