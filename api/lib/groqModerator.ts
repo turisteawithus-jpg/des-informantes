@@ -97,6 +97,59 @@ SIN_TEMAS`;
   }
 }
 
+/**
+ * Redacta el "puente" de moderacion: el contexto con el que el moderador abre
+ * un nuevo momento (fase o tema), conectando lo avanzado con lo que viene.
+ * Lenguaje humano de facilitacion, breve (maximo ~90 palabras).
+ * NUNCA menciona compromisos si la conclusion previa no los tiene.
+ */
+export async function generatePhaseBridge(
+  workspaceName: string,
+  discussionTitle: string,
+  topicTitle: string,
+  prevPhaseName: string | null,
+  nextPhaseName: string,
+  nextPhaseObjective: string,
+  conclusionContent: string | null,
+): Promise<string | null> {
+  if (!env.groqApiKey) return null;
+  const prompt = `Eres el Moderador IA de DES Informantes. Vas a anunciar al grupo el siguiente momento de su discusion "${discussionTitle}" (mesa "${workspaceName}").
+
+Tema en curso: "${topicTitle}".
+${prevPhaseName ? `Momento que acaba de concluir: "${prevPhaseName}".` : "La discusion acaba de arrancar."}
+Siguiente momento: "${nextPhaseName}", cuyo proposito es: ${nextPhaseObjective}.
+
+${conclusionContent ? `Esto fue lo que concluyo el momento anterior:\n${conclusionContent}\n` : ""}
+Redacta el anuncio de apertura del siguiente momento en espanol, como lo diria un moderador humano experto:
+- Maximo 90 palabras, en UN solo parrafo (sin titulos, sin listas, sin Markdown).
+- Conecta de forma natural lo que el grupo logro con lo que viene.
+- Explica que se espera lograr en este nuevo momento y por que es el paso correcto ahora.
+- Si el momento anterior NO registro compromisos, NO menciones la palabra compromisos ni sugieras que existen.
+- Tono cercano, claro y motivador, sin exclamaciones exageradas.
+
+Responde SOLO con el parrafo del anuncio, nada mas.`;
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.groqApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.5,
+        max_tokens: 320,
+      }),
+    });
+    if (!res.ok) { console.error("[groq-puente] Error HTTP:", res.status); return null; }
+    const data = await res.json();
+    const text: string = data.choices?.[0]?.message?.content || "";
+    return text.trim() || null;
+  } catch (e: any) {
+    console.error("[groq-puente] Error:", e.message);
+    return null;
+  }
+}
+
 export async function generateModeratorConclusion(
   workspaceName: string,
   discussionTitle: string,
@@ -122,13 +175,19 @@ ${transcript}
 Redacta en espanol la CONCLUSION de esta fase. En la PRIMERA linea escribe un titulo corto (maximo 8 palabras) con este formato exacto:
 TITULO: <titulo>
 
-Luego el cuerpo de la conclusion en Markdown con EXACTAMENTE estas cuatro secciones:
+Luego el cuerpo de la conclusion en Markdown con EXACTAMENTE estas cuatro secciones fijas:
 ## Ideas principales
 ## Acuerdos alcanzados
 ## Diferencias pendientes
 ## Recomendaciones para el siguiente momento
 
-Si alguna seccion no aplica, escribe "Sin elementos registrados" en ella. Tono profesional, objetivo y conciso.`;
+Si alguna de esas cuatro secciones no aplica, escribe "Sin elementos registrados" en ella.
+
+REGLA ESPECIAL DE COMPROMISOS: solo si los participantes asumieron compromisos CONCRETOS en esta fase (accion definida, idealmente con responsable), agrega al final una quinta seccion:
+## Compromisos asumidos
+Si NO hubo compromisos reales, OMITE esa seccion por completo: no la menciones, no escribas "sin compromisos" ni nada parecido. La mayoria de las fases no tienen compromisos.
+
+Tono profesional, objetivo y conciso.`;
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
