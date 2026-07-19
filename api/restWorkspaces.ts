@@ -723,7 +723,31 @@ restWorkspaces.get("/discussion/:id/moderation-state", async (c) => {
     where: eq(moderationConclusions.discussionId, discId),
     orderBy: [asc(moderationConclusions.createdAt)],
   });
-  return c.json({ state, conclusions });
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  return c.json({ state: { ...state, topics }, conclusions });
+});
+
+// POST /discussion/:id/topics — cualquier participante puede agregar un tema
+restWorkspaces.post("/discussion/:id/topics", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const title = body.title?.trim();
+  if (!title || title.length < 3) return c.json({ error: "Titulo muy corto" }, 400);
+  const db = getDb();
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state) return c.json({ error: "Moderador no activado" }, 400);
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  topics.push(title.slice(0, 150));
+  await db.update(discussionModerationStates)
+    .set({ topics: JSON.stringify(topics), updatedAt: new Date() })
+    .where(eq(discussionModerationStates.discussionId, discId));
+  return c.json({ ok: true, topics });
 });
 
 // POST /discussion/:id/activate-moderator — activar el moderador IA
