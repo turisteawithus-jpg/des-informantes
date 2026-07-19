@@ -6,10 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { AudioRecorder } from "@/components/AudioRecorder";
 import { MarkdownView } from "@/components/MarkdownView";
 import { useAuth } from "@/hooks/useAuth";
-import { uploadAudio } from "@/lib/upload";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X,
@@ -55,7 +53,6 @@ export default function DiscussionRoom() {
   const [relatoria, setRelatoria] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
-  const [audioError, setAudioError] = useState("");
   const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -65,6 +62,7 @@ export default function DiscussionRoom() {
   // Moderador IA
   const [modState, setModState] = useState<any>(null);
   const [modOpen, setModOpen] = useState(false);
+  const [modTab, setModTab] = useState<"moderador" | "resumenes">("moderador");
   const [overlay, setOverlay] = useState<{ kind: "activated" | "phase" | "roundComplete"; phase?: string } | null>(null);
   const [conclusionTitle, setConclusionTitle] = useState("");
   const [conclusionContent, setConclusionContent] = useState("");
@@ -73,7 +71,7 @@ export default function DiscussionRoom() {
   const prevPhaseRef = useRef<string | null>(null);
   const prevRoundCompleteRef = useRef(false);
 
-  // Puede moderar: admin general (en cualquier chat) o admin de ESTA mesa
+  // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
   const isOpen = discussion?.status === "open";
 
@@ -168,10 +166,10 @@ export default function DiscussionRoom() {
     prevPhaseRef.current = currentPhase;
   }, [currentPhase, modState?.state?.active]);
 
-  // Detectar ronda completada -> aviso al que modera
+  // Detectar ronda completada -> el anuncio le sale a CUALQUIER participante
   const roundComplete = !!(modState?.state?.active && modState.state.interventionsCompleted >= modState.state.interventionsRequired);
   useEffect(() => {
-    if (roundComplete && !prevRoundCompleteRef.current && canModerate) {
+    if (roundComplete && !prevRoundCompleteRef.current) {
       setOverlay({ kind: "roundComplete", phase: modState.state.currentPhase });
     }
     prevRoundCompleteRef.current = roundComplete;
@@ -250,14 +248,6 @@ export default function DiscussionRoom() {
     } catch (e) { console.error(e); }
   }
 
-  async function handleAudio(blob: Blob) {
-    setAudioError("");
-    const res = await uploadAudio(discussionId, blob);
-    if (!res.ok) setAudioError(res.error ?? "Error al subir audio");
-    await fetchMessages();
-    await fetchModState();
-  }
-
   async function activateModerator() {
     try {
       const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/activate-moderator`, {
@@ -272,14 +262,15 @@ export default function DiscussionRoom() {
   }
 
   async function advancePhase() {
+    if (!conclusionTitle.trim() || !conclusionContent.trim()) return;
     setAdvancing(true);
     try {
       const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/next-phase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conclusionTitle: conclusionTitle.trim() || undefined,
-          conclusionContent: conclusionContent.trim() || undefined,
+          conclusionTitle: conclusionTitle.trim(),
+          conclusionContent: conclusionContent.trim(),
         }),
         credentials: "include",
       });
@@ -300,7 +291,11 @@ export default function DiscussionRoom() {
         method: "POST",
         credentials: "include",
       });
-      if (res.ok) await fetchSummaries();
+      if (res.ok) {
+        await fetchSummaries();
+        setModTab("resumenes");
+        setModOpen(true);
+      }
     } catch (e) { console.error(e); }
     setGeneratingSummary(false);
   }
@@ -325,14 +320,14 @@ export default function DiscussionRoom() {
     overlay?.kind === "activated"
       ? `La discusion comienza en la fase de ${phaseName("apertura")}. ${PHASE_INFO.apertura.desc}`
     : overlay?.kind === "roundComplete"
-      ? `Se alcanzo el numero de intervenciones de la fase "${phaseName(overlay?.phase)}". El moderador puede registrar una conclusion y avanzar, o seguir conversando.`
+      ? `Se alcanzo el numero de intervenciones de la fase "${phaseName(overlay?.phase)}". Cualquier participante puede registrar la conclusion de la fase y avanzar, o seguir conversando.`
     : PHASE_INFO[overlay?.phase ?? ""]?.desc ?? "";
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <AppHeader />
       <div className="border-b bg-card">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
             <Button variant="ghost" size="icon" onClick={() => navigate(`/workspace/${discussion.workspaceId}`)}><ArrowLeft className="h-4 w-4" /></Button>
             <div className="min-w-0">
@@ -355,19 +350,42 @@ export default function DiscussionRoom() {
         </div>
       </div>
 
-      <div className="flex-1 max-w-6xl mx-auto w-full px-4 py-4 grid lg:grid-cols-[1fr_340px] gap-4">
+      <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-4">
         <div className="flex flex-col min-h-[60vh]">
           {pinnedMessages.length > 0 && (
             <div className="mb-3 space-y-2">
               <p className="text-xs font-medium text-amber-600 flex items-center gap-1"><Pin className="h-3 w-3" /> MENSAJES FIJADOS</p>
               {pinnedMessages.map((m) => (
-                <div key={`pinned-${m.id}`} className="border-2 border-amber-300 bg-amber-50 rounded-xl px-4 py-2.5 shadow-sm">
+                <div key={`pinned-${m.id}`} className="border-2 border-amber-300 bg-amber-50 rounded-xl px-4 py-2.5 shadow-sm relative group">
+                  {canModerate && (
+                    <div className="absolute -top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-amber-100" title="Dejar de fijar" onClick={() => togglePin(m.id)}>
+                        <PinOff className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-blue-100 text-blue-500" title="Editar mensaje" onClick={() => { setEditingId(m.id); setEditText(m.content || ""); }}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-red-100 text-red-500" title="Eliminar mensaje" onClick={() => deleteMsg(m.id)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-semibold text-amber-700">{m.username}</span>
                     <Pin className="h-3 w-3 text-amber-500" />
                     <span className="text-[10px] text-muted-foreground">{new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
-                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                  {editingId === m.id ? (
+                    <div className="space-y-2">
+                      <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm bg-background text-foreground" rows={4} autoFocus />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => editMsg(m.id)} className="h-7 text-xs">Guardar</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditingId(null)} className="h-7 text-xs">Cancelar</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -376,7 +394,7 @@ export default function DiscussionRoom() {
           <div className="flex-1 space-y-3 overflow-y-auto pb-4">
             {normalMessages.length === 0 && (
               <Card className="border-dashed"><CardContent className="py-10 text-center text-muted-foreground">
-                <MessageSquareText className="h-10 w-10 mx-auto mb-2 opacity-50" />La discusion esta lista. Escribe o graba un audio.
+                <MessageSquareText className="h-10 w-10 mx-auto mb-2 opacity-50" />La discusion esta lista. Escribe el primer mensaje.
               </CardContent></Card>
             )}
             {normalMessages.map((m) => {
@@ -386,8 +404,8 @@ export default function DiscussionRoom() {
                   <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm ${mine ? "di-gradient text-white" : "bg-card border-2"} relative group`}>
                     {canModerate && (
                       <div className="absolute -top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-amber-100" title={m.pinned ? "Desfijar" : "Fijar"} onClick={() => togglePin(m.id)}>
-                          {m.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                        <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-amber-100" title="Fijar" onClick={() => togglePin(m.id)}>
+                          <Pin className="h-3 w-3" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-blue-100 text-blue-500" title="Editar mensaje" onClick={() => { setEditingId(m.id); setEditText(m.content || ""); }}>
                           <Pencil className="h-3 w-3" />
@@ -407,9 +425,6 @@ export default function DiscussionRoom() {
                         <Volume2 className="h-4 w-4 shrink-0 opacity-80" />
                         <audio controls src={m.audioUrl} className="h-8 max-w-full" />
                       </div>
-                    )}
-                    {m.transcriptionStatus === "pending" && (
-                      <p className="text-xs italic opacity-80 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Transcribiendo...</p>
                     )}
                     {editingId === m.id ? (
                       <div className="space-y-2 min-w-[280px]">
@@ -433,10 +448,8 @@ export default function DiscussionRoom() {
           </div>
 
           {isOpen ? (
-            <div className="border-t pt-3 space-y-2">
-              {audioError && <p className="text-xs text-destructive">{audioError}</p>}
+            <div className="border-t pt-3">
               <form className="flex items-center gap-2" onSubmit={sendTextMsg}>
-                <AudioRecorder onRecorded={handleAudio} />
                 <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1" />
                 <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
               </form>
@@ -444,67 +457,63 @@ export default function DiscussionRoom() {
           ) : <div className="border-t pt-3 text-center text-sm text-muted-foreground">La discusion esta cerrada. Revisa la relatoria.</div>}
         </div>
 
-        <aside className="space-y-4">
-          <Card className="border-2">
-            <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center gap-2 rounded-t-xl">
-              <Sparkles className="h-4 w-4" /> Moderacion IA
-            </div>
-            <CardContent className="pt-3 space-y-3 max-h-[40vh] overflow-y-auto">
-              {!summaries.length && <p className="text-xs text-muted-foreground">Cada 5 mensajes, la IA resume: conclusiones, tareas y ambiente.</p>}
-              {summaries.map((s) => (
-                <div key={s.id} className="border rounded-lg p-2.5 bg-secondary/40">
-                  <p className="text-[10px] text-muted-foreground mb-1">
-                    Resumen tras {s.messageCount} mensajes · {new Date(s.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                  <MarkdownView content={s.content} />
-                </div>
-              ))}
+        {closing && (
+          <Card className="border-2 mt-4">
+            <CardContent className="py-6 text-center text-sm text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
+              La IA esta redactando la relatoria...
             </CardContent>
           </Card>
+        )}
 
-          {relatoria && (
-            <Card className="border-2 border-primary">
-              <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center gap-2 rounded-t-xl">
-                <ScrollText className="h-4 w-4" /> Relatoria oficial
-              </div>
-              <CardContent className="pt-3 max-h-[50vh] overflow-y-auto">
-                <MarkdownView content={relatoria.content} />
-              </CardContent>
-            </Card>
-          )}
-
-          {closing && (
-            <Card className="border-2">
-              <CardContent className="py-6 text-center text-sm text-muted-foreground">
-                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
-                La IA esta redactando la relatoria...
-              </CardContent>
-            </Card>
-          )}
-        </aside>
+        {relatoria && (
+          <Card className="border-2 border-primary mt-4">
+            <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center gap-2 rounded-t-xl">
+              <ScrollText className="h-4 w-4" /> Relatoria oficial
+            </div>
+            <CardContent className="pt-3">
+              <MarkdownView content={relatoria.content} />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Widget flotante del Moderador IA */}
+      {/* Widget flotante: Moderador IA + Resumenes */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
         {modOpen && (
           <Card className="w-80 border-2 shadow-2xl">
             <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center justify-between rounded-t-xl">
-              <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Moderador IA</span>
+              <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Moderacion IA</span>
               <button onClick={() => setModOpen(false)} className="text-white/80 hover:text-white" title="Cerrar panel"><X className="h-4 w-4" /></button>
             </div>
+            <div className="flex border-b text-xs">
+              <button onClick={() => setModTab("moderador")} className={`flex-1 py-2 font-medium ${modTab === "moderador" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Moderador</button>
+              <button onClick={() => setModTab("resumenes")} className={`flex-1 py-2 font-medium ${modTab === "resumenes" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Resumenes IA</button>
+            </div>
             <CardContent className="pt-3 space-y-3 max-h-[50vh] overflow-y-auto">
-              {!modActive ? (
+              {modTab === "resumenes" ? (
+                <>
+                  {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes que la IA genera de la discusion: conclusiones, tareas y ambiente.</p>}
+                  {summaries.map((s) => (
+                    <div key={s.id} className="border rounded-lg p-2.5 bg-secondary/40">
+                      <p className="text-[10px] text-muted-foreground mb-1">
+                        Resumen tras {s.messageCount} mensajes · {new Date(s.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      <MarkdownView content={s.content} />
+                    </div>
+                  ))}
+                  <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
+                    {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
+                  </Button>
+                </>
+              ) : !modActive ? (
                 <>
                   <p className="text-xs text-muted-foreground">
                     El moderador guia la discusion por fases (apertura, contextualizacion, acuerdos, compromisos...) con rondas de palabras: cuenta las intervenciones y avisa cuando es momento de avanzar.
                   </p>
-                  {canModerate ? (
-                    <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
-                      <Sparkles className="h-3.5 w-3.5" /> Activar moderador
-                    </Button>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">El administrador de la mesa puede activarlo.</p>
-                  )}
+                  <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
+                    <Sparkles className="h-3.5 w-3.5" /> Activar moderador
+                  </Button>
                 </>
               ) : (
                 <>
@@ -520,16 +529,14 @@ export default function DiscussionRoom() {
                     </div>
                     <p className="text-[10px] text-muted-foreground">Ronda #{modState.state.wordRound}</p>
                   </div>
-                  {canModerate && (
-                    <div className="space-y-2 pt-1">
-                      <Button size="sm" className="w-full" onClick={() => setOverlay({ kind: "roundComplete", phase: currentPhase })}>
-                        Avanzar a: {phaseName(nextPhaseKey(currentPhase))}
-                      </Button>
-                      <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
-                        {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
-                      </Button>
-                    </div>
-                  )}
+                  <div className="space-y-2 pt-1">
+                    <Button size="sm" className="w-full" onClick={() => setOverlay({ kind: "roundComplete", phase: currentPhase })}>
+                      Avanzar a: {phaseName(nextPhaseKey(currentPhase))}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
+                      {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
+                    </Button>
+                  </div>
                   {conclusions.length > 0 && (
                     <div className="space-y-1.5 pt-1">
                       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Conclusiones por fase</p>
@@ -546,7 +553,7 @@ export default function DiscussionRoom() {
             </CardContent>
           </Card>
         )}
-        <Button onClick={() => setModOpen(!modOpen)} className="rounded-full shadow-lg gap-2 di-gradient text-white">
+        <Button onClick={() => setModOpen(!modOpen)} className={`rounded-full shadow-lg gap-2 di-gradient text-white ${roundComplete ? "animate-pulse" : ""}`}>
           <Sparkles className="h-4 w-4" />
           {modActive ? `Moderador: ${phaseName(currentPhase)}` : "Moderador IA"}
           {modActive && (
@@ -566,22 +573,26 @@ export default function DiscussionRoom() {
             </div>
             <CardContent className="pt-5 space-y-4">
               <p className="text-center text-sm text-muted-foreground leading-relaxed">{overlayDesc}</p>
-              {overlay.kind === "roundComplete" && canModerate ? (
+              {overlay.kind === "roundComplete" ? (
                 <div className="space-y-3">
                   <Input
-                    placeholder="Titulo de la conclusion (opcional)"
+                    placeholder="Titulo de la conclusion de esta fase"
                     value={conclusionTitle}
                     onChange={(e) => setConclusionTitle(e.target.value)}
                   />
                   <Textarea
-                    placeholder="Conclusion de esta fase (opcional)"
+                    placeholder="Conclusion de esta fase (obligatoria para avanzar)"
                     value={conclusionContent}
                     onChange={(e) => setConclusionContent(e.target.value)}
                     rows={3}
                   />
                   <div className="flex gap-2">
                     <Button variant="outline" className="flex-1" onClick={() => setOverlay(null)}>Seguir conversando</Button>
-                    <Button className="flex-1 di-gradient text-white" disabled={advancing} onClick={advancePhase}>
+                    <Button
+                      className="flex-1 di-gradient text-white"
+                      disabled={advancing || !conclusionTitle.trim() || !conclusionContent.trim()}
+                      onClick={advancePhase}
+                    >
                       {advancing ? <Loader2 className="h-4 w-4 animate-spin" /> : `Avanzar a: ${phaseName(nextPhaseKey(overlay.phase))}`}
                     </Button>
                   </div>
