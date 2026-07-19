@@ -19,6 +19,7 @@ import {
 } from "@db/schema";
 import { eq, asc } from "drizzle-orm";
 import { generateTopicList } from "./lib/groqModerator";
+import { attachCollabServer } from "./lib/collab";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -189,11 +190,14 @@ async function processCompletedRounds() {
 
 setInterval(processCompletedRounds, 12000);
 
-serve({
+const server = serve({
   fetch: app.fetch,
   port: parseInt(process.env.PORT || "3000"),
 }, (info) => {
   console.log(`Server running on http://localhost:${info.port}/`);
 });
+
+// Edicion en vivo de documentos (WebSocket en el mismo puerto, ruta /collab/)
+attachCollabServer(server);
 
 export default app;
