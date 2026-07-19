@@ -34,7 +34,7 @@ function phaseName(key: string | undefined) {
 }
 
 type Overlay = {
-  kind: "activated" | "topics" | "topic" | "phase" | "finished";
+  kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision";
   phase?: string;
   prevPhase?: string;
 } | null;
@@ -70,6 +70,10 @@ export default function DiscussionRoom() {
   const prevTopicIdxRef = useRef<number | null>(null);
   const prevPhaseRef = useRef<string | null>(null);
   const prevActiveRef = useRef<boolean>(false);
+  const prevWordRoundRef = useRef<number | null>(null);
+  const prevRoundCompleteRef = useRef<boolean>(false);
+  const [overlayStep, setOverlayStep] = useState<1 | 2>(1);
+  const [deciding, setDeciding] = useState<"round" | "advance" | null>(null);
 
   // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -156,11 +160,20 @@ export default function DiscussionRoom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  // Deteccion de transiciones del moderador automatico
+  // Deteccion de transiciones del moderador
   const currentPhase: string | undefined = modState?.state?.currentPhase;
   const modActiveNow = !!modState?.state?.active;
   const topicsList: string[] = modState?.state?.topics ?? [];
   const topicIdx: number = modState?.state?.currentTopicIndex ?? 0;
+  const wordRound: number = modState?.state?.wordRound ?? 1;
+
+  // El moderador (persona): quien activo el moderador, admin de la mesa o admin general.
+  // SOLO esta persona ve la pregunta "otra ronda o siguiente momento".
+  const canDecide =
+    !!user &&
+    (user.userId === modState?.state?.activatedBy ||
+      discussion?.memberRole === "admin" ||
+      isGeneralAdmin);
 
   useEffect(() => {
     if (!modState?.state) return;
@@ -168,6 +181,7 @@ export default function DiscussionRoom() {
       prevTopicsCountRef.current = topicsList.length;
       prevTopicIdxRef.current = topicIdx;
       prevPhaseRef.current = currentPhase ?? null;
+      prevWordRoundRef.current = wordRound;
       return;
     }
     // 1. Se acaban de definir los temas (primera ronda completada)
@@ -182,7 +196,7 @@ export default function DiscussionRoom() {
     ) {
       setOverlay({ kind: "topic", phase: currentPhase });
     }
-    // 3. Cambio de fase dentro del mismo tema
+    // 3. El moderador abrio un nuevo momento (cambio de fase dentro del mismo tema)
     else if (
       topicsList.length > 0 &&
       prevPhaseRef.current &&
@@ -190,10 +204,36 @@ export default function DiscussionRoom() {
     ) {
       setOverlay({ kind: "phase", phase: currentPhase, prevPhase: prevPhaseRef.current });
     }
+    // 4. El moderador pidio OTRA ronda de palabras (mismo tema y fase, cambia la ronda)
+    else if (
+      prevWordRoundRef.current !== null &&
+      wordRound !== prevWordRoundRef.current
+    ) {
+      setOverlay({ kind: "round" });
+    }
     prevTopicsCountRef.current = topicsList.length;
     prevTopicIdxRef.current = topicIdx;
     prevPhaseRef.current = currentPhase ?? null;
-  }, [currentPhase, topicIdx, topicsList.length, modActiveNow]);
+    prevWordRoundRef.current = wordRound;
+  }, [currentPhase, topicIdx, topicsList.length, modActiveNow, wordRound]);
+
+  // Cuando la ronda se completa, la pregunta "otra ronda o avanzar" aparece
+  // SOLO al moderador (persona). Los demas solo ven que la ronda se completo.
+  const roundCompleteNow =
+    modActiveNow &&
+    topicsList.length > 0 &&
+    (modState?.state?.interventionsCompleted ?? 0) >= (modState?.state?.interventionsRequired ?? 5);
+  useEffect(() => {
+    if (roundCompleteNow && !prevRoundCompleteRef.current && canDecide) {
+      setOverlay((cur) => cur ?? { kind: "decision" });
+    }
+    prevRoundCompleteRef.current = roundCompleteNow;
+  }, [roundCompleteNow, canDecide]);
+
+  // Cada anuncio nuevo arranca en su primer paso
+  useEffect(() => {
+    setOverlayStep(1);
+  }, [overlay?.kind, overlay?.phase]);
 
   // Cuando el moderador termina todos los temas
   useEffect(() => {
@@ -309,6 +349,46 @@ export default function DiscussionRoom() {
     setSavingTopic(false);
   }
 
+  // El moderador (persona) decide: OTRA ronda de palabras
+  async function decideNextRound() {
+    if (deciding) return;
+    setDeciding("round");
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/next-round`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setOverlay(null);
+        await fetchModState(); // el cambio de ronda dispara el anuncio breve para TODOS
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo aplicar la decision");
+      }
+    } catch (e) { console.error(e); }
+    setDeciding(null);
+  }
+
+  // El moderador (persona) decide: AVANZAR (la IA cierra el momento y abre el siguiente)
+  async function decideAdvance() {
+    if (deciding) return;
+    setDeciding("advance");
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/advance-phase`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setOverlay(null);
+        await fetchModState(); // el cambio de fase dispara el anuncio en 2 pasos para TODOS
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo aplicar la decision");
+      }
+    } catch (e) { console.error(e); }
+    setDeciding(null);
+  }
+
   async function generatePartialSummary() {
     setGeneratingSummary(true);
     try {
@@ -331,10 +411,12 @@ export default function DiscussionRoom() {
 
   const pinnedMessages = messages.filter((m) => m.pinned);
   const normalMessages = messages.filter((m) => !m.pinned);
-  const interventionsCompleted = modState?.state?.interventionsCompleted ?? 0;
+  const interventionsCompleted = Math.min(modState?.state?.interventionsCompleted ?? 0, modState?.state?.interventionsRequired ?? 5);
   const interventionsRequired = modState?.state?.interventionsRequired ?? 5;
   const progressPct = Math.min(100, Math.round((interventionsCompleted / Math.max(1, interventionsRequired)) * 100));
   const roundComplete = modActiveNow && interventionsCompleted >= interventionsRequired;
+  // Ronda completa con temas ya definidos: el avance queda en manos del moderador (persona)
+  const decisionPending = roundComplete && topicsList.length > 0;
   const conclusions: any[] = modState?.conclusions ?? [];
   const lastConclusion = conclusions.length > 0 ? conclusions[conclusions.length - 1] : null;
   // La relatoria en proceso muestra SOLO las conclusiones del tema actual (se reinicia por tema)
@@ -631,10 +713,22 @@ export default function DiscussionRoom() {
                                 Tema {topicIdx + 1}/{topicsList.length} · Fase actual
                               </p>
                               <p className="font-display text-base leading-tight">{phaseName(currentPhase)}</p>
-                              {roundComplete ? (
-                                <p className="text-xs text-primary flex items-center gap-1.5 mt-1">
-                                  <Loader2 className="h-3 w-3 animate-spin" /> La IA esta redactando la conclusion...
-                                </p>
+                              {decisionPending ? (
+                                <div className="mt-1">
+                                  <p className="text-xs text-primary font-medium">
+                                    Ronda completa ({interventionsRequired} palabras).
+                                  </p>
+                                  {canDecide ? (
+                                    <>
+                                      <p className="text-xs text-muted-foreground mt-0.5">Te toca decidir el siguiente paso.</p>
+                                      <Button size="sm" className="w-full mt-1.5 h-7 text-xs di-gradient text-white" onClick={() => { setModOpen(false); setOverlay({ kind: "decision" }); }}>
+                                        Decidir ahora
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground mt-0.5">El moderador esta definiendo el siguiente paso.</p>
+                                  )}
+                                </div>
                               ) : (
                                 <>
                                   <p className="text-xs mt-1">Ronda de palabras: <strong>{interventionsCompleted} de {interventionsRequired}</strong></p>
@@ -676,17 +770,23 @@ export default function DiscussionRoom() {
             </CardContent>
           </Card>
         )}
-        <Button onClick={() => setModOpen(!modOpen)} className={`rounded-full shadow-lg gap-2 di-gradient text-white ${roundComplete ? "animate-pulse" : ""}`}>
+        <Button
+          onClick={() => {
+            if (decisionPending && canDecide) setOverlay({ kind: "decision" });
+            else setModOpen(!modOpen);
+          }}
+          className={`rounded-full shadow-lg gap-2 di-gradient text-white ${decisionPending && canDecide ? "animate-pulse" : ""}`}
+        >
           <Sparkles className="h-4 w-4" />
           {!modState ? "Moderador IA"
-            : roundComplete ? "La IA esta trabajando..."
-            : selectingTopics ? `Propuesta de temas`
+            : decisionPending ? (canDecide ? "Decidir el siguiente paso" : "El moderador esta decidiendo...")
+            : selectingTopics ? (roundComplete ? "La IA organiza los temas..." : "Propuesta de temas")
             : modActiveNow ? `Tema ${topicIdx + 1}/${topicsList.length}: ${phaseName(currentPhase)}`
             : "Relatoria en proceso"}
           {modActiveNow && !roundComplete && (
             <span className="text-[10px] bg-white/25 rounded-full px-2 py-0.5">{interventionsCompleted}/{interventionsRequired}</span>
           )}
-          {modActiveNow && roundComplete && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {selectingTopics && roundComplete && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         </Button>
       </div>,
       document.body,
@@ -703,7 +803,9 @@ export default function DiscussionRoom() {
                 {overlay.kind === "activated" && "Propuesta de temas"}
                 {overlay.kind === "topics" && "Temas de la discusion"}
                 {overlay.kind === "topic" && `Tema ${topicIdx + 1}: ${topicsList[topicIdx] ?? ""}`}
-                {overlay.kind === "phase" && `Fase: ${phaseName(overlay.phase)}`}
+                {overlay.kind === "phase" && (overlayStep === 1 ? "Cierre del momento" : `Fase: ${phaseName(overlay.phase)}`)}
+                {overlay.kind === "round" && "Nueva ronda de palabras"}
+                {overlay.kind === "decision" && "La ronda se completo"}
                 {overlay.kind === "finished" && "Moderacion finalizada"}
               </h2>
             </div>
@@ -730,39 +832,72 @@ export default function DiscussionRoom() {
                   </p>
                 </>
               )}
-              {overlay.kind === "topic" && (
+              {overlay.kind === "round" && (
+                <p className="text-center text-sm text-muted-foreground leading-relaxed">
+                  El moderador decidio escuchar de nuevo al grupo: <strong>tenemos otra ronda de palabras</strong> sobre este mismo momento.
+                  <br /><br />Cada participante puede intervenir de nuevo antes de avanzar.
+                </p>
+              )}
+              {overlay.kind === "decision" && (
                 <>
-                  {lastConclusion && (
-                    <div className="border rounded-lg p-3 bg-secondary/40">
-                      <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1">
-                        El tema anterior concluyo con: {lastConclusion.title}
-                      </p>
-                      <div className="text-sm text-muted-foreground">
-                        <MarkdownView content={lastConclusion.content} />
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-center text-sm leading-relaxed">
-                    Abrimos un nuevo tema. La <strong>Relatoria en proceso</strong> se reinicia: ahora se llenara con las conclusiones de este tema.
+                  <p className="text-center text-sm text-muted-foreground leading-relaxed">
+                    La ronda de palabras se completo. Como moderador de la discusion, defines el rumbo:
                   </p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <button
+                      onClick={decideNextRound}
+                      disabled={deciding !== null}
+                      className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
+                    >
+                      <p className="font-display text-lg leading-tight">Otra ronda de palabras</p>
+                      <p className="text-xs text-muted-foreground mt-1">El grupo vuelve a intervenir sobre este mismo momento, sin avanzar.</p>
+                      {deciding === "round" && <Loader2 className="h-4 w-4 animate-spin mt-2 text-primary" />}
+                    </button>
+                    <button
+                      onClick={decideAdvance}
+                      disabled={deciding !== null}
+                      className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
+                    >
+                      <p className="font-display text-lg leading-tight">Abrir el siguiente momento</p>
+                      <p className="text-xs text-muted-foreground mt-1">La IA cierra este momento con su analisis y abre el siguiente con su contexto.</p>
+                      {deciding === "advance" && (
+                        <p className="text-xs text-primary flex items-center gap-1.5 mt-2"><Loader2 className="h-4 w-4 animate-spin" /> La IA esta trabajando...</p>
+                      )}
+                    </button>
+                  </div>
                 </>
               )}
-              {overlay.kind === "phase" && (
+              {/* Avance de momento: PASO 1 = analisis de lo logrado; PASO 2 = contexto del nuevo momento */}
+              {(overlay.kind === "topic" || overlay.kind === "phase") && overlayStep === 1 && (
                 <>
                   {lastConclusion && (
                     <div className="border rounded-lg p-3 bg-secondary/40">
                       <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1">
-                        Conclusion de la fase {phaseName(overlay.prevPhase)}: {lastConclusion.title}
+                        {overlay.kind === "topic"
+                          ? `El tema anterior concluyo con: ${lastConclusion.title}`
+                          : `Conclusion de la fase ${phaseName(overlay.prevPhase)}: ${lastConclusion.title}`}
                       </p>
                       <div className="text-sm text-muted-foreground">
                         <MarkdownView content={lastConclusion.content} />
                       </div>
                     </div>
                   )}
-                  <p className="text-center text-sm leading-relaxed">
-                    <strong>Siguiente momento:</strong> {PHASE_INFO[overlay.phase ?? ""]?.desc}
-                  </p>
+                  {overlay.kind === "topic" && (
+                    <p className="text-center text-sm leading-relaxed">
+                      Abrimos un nuevo tema. La <strong>Relatoria en proceso</strong> se reinicia: ahora se llenara con las conclusiones de este tema.
+                    </p>
+                  )}
                 </>
+              )}
+              {(overlay.kind === "topic" || overlay.kind === "phase") && overlayStep === 2 && (
+                <div className="border-l-4 border-primary bg-primary/5 rounded-r-xl p-4">
+                  <p className="text-[10px] uppercase tracking-wide text-primary font-semibold mb-1.5">
+                    Contexto del nuevo momento
+                  </p>
+                  <p className="text-sm leading-relaxed">
+                    {modState?.state?.bridgeText || PHASE_INFO[overlay.phase ?? ""]?.desc || "Comenzamos un nuevo momento de la discusion."}
+                  </p>
+                </div>
               )}
               {overlay.kind === "finished" && (
                 <>
@@ -782,7 +917,17 @@ export default function DiscussionRoom() {
                 </>
               )}
               <div className="flex gap-2">
-                <Button className="flex-1 di-gradient text-white" onClick={() => setOverlay(null)}>Continuar</Button>
+                {overlay.kind === "decision" ? (
+                  <Button className="flex-1" variant="ghost" onClick={() => setOverlay(null)} disabled={deciding !== null}>
+                    Decidir despues
+                  </Button>
+                ) : (overlay.kind === "topic" || overlay.kind === "phase") && overlayStep === 1 ? (
+                  <Button className="flex-1 di-gradient text-white" onClick={() => setOverlayStep(2)}>Continuar</Button>
+                ) : (
+                  <Button className="flex-1 di-gradient text-white" onClick={() => setOverlay(null)}>
+                    {overlay.kind === "topic" || overlay.kind === "phase" ? "Comenzar" : "Continuar"}
+                  </Button>
+                )}
                 {overlay.kind === "finished" && canModerate && isOpen && (
                   <Button className="flex-1" variant="outline" disabled={closing} onClick={closeDisc}>
                     {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cerrar y generar relatoria"}
