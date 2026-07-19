@@ -29,7 +29,9 @@ export function nextPhaseKeyServer(key: string): string {
 
 /**
  * El Moderador IA genera la conclusion objetiva de una fase.
- * No opina ni participa: sintetiza ideas, acuerdos, diferencias y recomendaciones.
+ * No opina ni participa: recoge la discusion, muestra las posturas de cada
+ * participante (citandolo por su nombre de usuario) y sintetiza ideas,
+ * acuerdos, diferencias y conclusiones importantes.
  */
 /**
  * Extrae y organiza SOLO los temas propuestos por los usuarios en la primera ronda.
@@ -123,9 +125,9 @@ ${conclusionContent ? `Esto fue lo que concluyo el momento anterior:\n${conclusi
 Redacta el anuncio de apertura del siguiente momento en espanol, como lo diria un moderador humano experto:
 - Maximo 90 palabras, en UN solo parrafo (sin titulos, sin listas, sin Markdown).
 - Conecta de forma natural lo que el grupo logro con lo que viene.
-- Explica que se espera lograr en este nuevo momento y por que es el paso correcto ahora.
+- Explica con palabras sencillas que se espera lograr en este nuevo momento y por que tiene sentido dar este paso ahora.
 - Si el momento anterior NO registro compromisos, NO menciones la palabra compromisos ni sugieras que existen.
-- Tono cercano, claro y motivador, sin exclamaciones exageradas.
+- Tono cercano y calido, con la formalidad justa de quien guia una conversacion entre conocidos: nada de tecnicismos, palabras rebuscadas ni exclamaciones exageradas.
 
 Responde SOLO con el parrafo del anuncio, nada mas.`;
 
@@ -177,10 +179,11 @@ Lo que ha pasado hasta ahora en ESTE tema:
 ${history}
 
 Redacta en espanol el mensaje de bienvenida para ${username}:
-- Saludalo por su nombre de forma calida pero sobria.
-- Ubicalo: en que tema y momento va la discusion y que se busca en este momento.
+- Saludalo por su nombre de forma calida y cercana, como un buen anfitrion (por ejemplo: "Que bueno tenerte de vuelta, ...").
+- Ubicalo con palabras sencillas: en que tema y momento va la conversacion y que se busca lograr en este momento.
 - Resume en UNA frase lo que ya se recorrio en este tema (sin listas).
 - Maximo 80 palabras, UN solo parrafo, sin Markdown ni titulos.
+- Lenguaje sencillo y calido, con la formalidad justa de quien recibe a alguien en una reunion: nada de terminos tecnicos ni palabras rebuscadas.
 - No menciones compromisos salvo que la historia los muestre explicitamente.
 
 Responde SOLO con el parrafo, nada mas.`;
@@ -279,9 +282,13 @@ Luego el cuerpo de la conclusion en Markdown con EXACTAMENTE estas cuatro seccio
 ## Ideas principales
 ## Acuerdos alcanzados
 ## Diferencias pendientes
-## Recomendaciones para el siguiente momento
+## Conclusiones importantes
 
-Si alguna de esas cuatro secciones no aplica, escribe "Sin elementos registrados" en ella.
+COMO REDACTAR EL CUERPO:
+- Recoge la discusion tal como ocurrio: que se dijo, que posturas aparecieron y quien las sostuvo.
+- Atribuye las posturas e ideas a los participantes POR SU NOMBRE DE USUARIO, de forma natural. Ejemplos: "Maria propuso que...", "Para Carlos lo central es...", "Luis y Ana coincidieron en que...", "Frente a la postura de Pedro, Diana senalo que...".
+- Resume las posiciones de manera breve y fiel: NO inventes posturas que nadie expreso ni atribuyas algo a quien no lo dijo.
+- Si alguna de las cuatro secciones no aplica, escribe "Sin elementos registrados" en ella.
 
 REGLA ESPECIAL DE COMPROMISOS: solo si los participantes asumieron compromisos CONCRETOS en esta fase (accion definida, idealmente con responsable), agrega al final una quinta seccion:
 ## Compromisos asumidos
@@ -289,7 +296,7 @@ Cada compromiso se escribe en su propia linea con EXACTAMENTE este formato (para
 - <texto del compromiso> | Responsable: <nombre del participante o "Por definir"> | Fecha: <fecha acordada o "Sin fecha">
 Si NO hubo compromisos reales, OMITE esa seccion por completo: no la menciones, no escribas "sin compromisos" ni nada parecido. La mayoria de las fases no tienen compromisos.
 
-Tono profesional, objetivo y conciso.`;
+Tono profesional y objetivo, pero con lenguaje sencillo y cercano, sin tecnicismos.`;
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
