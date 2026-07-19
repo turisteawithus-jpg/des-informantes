@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router";
 import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownView } from "@/components/MarkdownView";
@@ -12,8 +13,10 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
-  CheckCircle2, ListOrdered, Hand, Flag,
+  CheckCircle2, ListOrdered, Hand, ChevronRight, ChevronDown,
+  ChevronUp, Paperclip, Link2, FileText, Milestone,
 } from "lucide-react";
+import { uploadDocument } from "@/lib/upload";
 
 const PHASE_INFO: Record<string, { name: string; desc: string }> = {
   apertura: { name: "Apertura", desc: "Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
@@ -34,9 +37,10 @@ function phaseName(key: string | undefined) {
 }
 
 type Overlay = {
-  kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision" | "waiting";
+  kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision" | "waiting" | "welcomeback";
   phase?: string;
   prevPhase?: string;
+  text?: string;
 } | null;
 
 export default function DiscussionRoom() {
@@ -75,6 +79,16 @@ export default function DiscussionRoom() {
   const [overlayStep, setOverlayStep] = useState<1 | 2>(1);
   const [deciding, setDeciding] = useState<"round" | "advance" | null>(null);
   const [raisingHand, setRaisingHand] = useState(false);
+
+  // Linea de tiempo: documentos anclados + notas de temas + plegado por tema
+  const [docsList, setDocsList] = useState<any[]>([]);
+  const [topicInfos, setTopicInfos] = useState<Record<number, string>>({});
+  const [expandedTopics, setExpandedTopics] = useState<Record<number, boolean>>({});
+  const [docFor, setDocFor] = useState<{ conclusionId: number | null; topicTitle: string } | null>(null);
+  const [docTitle, setDocTitle] = useState("");
+  const [docUrl, setDocUrl] = useState("");
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docSaving, setDocSaving] = useState(false);
 
   // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -132,9 +146,19 @@ export default function DiscussionRoom() {
     } catch (e) { console.error(e); }
   }
 
+  async function fetchDocs() {
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/docs`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setDocsList(Array.isArray(data) ? data : []);
+      }
+    } catch (e) { console.error(e); }
+  }
+
   async function loadAll() {
     setLoading(true);
-    await Promise.all([fetchDiscussion(), fetchMessages(), fetchSummaries(), fetchRelatoria(), fetchModState()]);
+    await Promise.all([fetchDiscussion(), fetchMessages(), fetchSummaries(), fetchRelatoria(), fetchModState(), fetchDocs()]);
     setLoading(false);
   }
 
@@ -232,15 +256,47 @@ export default function DiscussionRoom() {
     prevRoundCompleteRef.current = roundCompleteNow;
   }, [roundCompleteNow, canDecide]);
 
-  // Bienvenida del moderador: el moderador IA se activa solo al abrir la
-  // discusion; este anuncio se muestra UNA vez por usuario y por discusion.
+  // Bienvenida del moderador: la PRIMERA vez se explica la propuesta de temas.
+  // En cada REINGRESO posterior, la IA recibe al usuario por su nombre y lo
+  // contextualiza: en que momento va la discusion y que ha pasado en este tema.
   useEffect(() => {
     if (!modState?.state?.active) return;
     const key = `di-mod-welcome-${discussionId}`;
-    if (localStorage.getItem(key)) return;
-    localStorage.setItem(key, "1");
-    setOverlay((cur) => cur ?? { kind: "activated" });
-  }, [modState?.state?.active, discussionId]);
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, "1");
+      setOverlay((cur) => cur ?? { kind: "activated" });
+      return;
+    }
+    if (topicsList.length === 0) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/welcome-back`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.text) setOverlay((cur) => cur ?? { kind: "welcomeback", text: data.text });
+        }
+      } catch { /* sin bienvenida de reingreso, no pasa nada */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modState?.state?.active, discussionId, topicsList.length]);
+
+  // Notas (block) del recuadro principal de cada tema, generadas por la IA
+  useEffect(() => {
+    if (topicsList.length === 0) return;
+    topicsList.forEach((_t, i) => {
+      if (topicInfos[i]) return;
+      (async () => {
+        try {
+          const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/topic-info?index=${i}`, { credentials: "include" });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.desc) setTopicInfos((prev) => ({ ...prev, [i]: data.desc }));
+          }
+        } catch { /* la nota queda pendiente para la proxima carga */ }
+      })();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicsList.length, discussionId]);
 
   // Cada anuncio nuevo arranca en su primer paso
   useEffect(() => {
@@ -413,6 +469,52 @@ export default function DiscussionRoom() {
       await fetchModState();
     } catch (e) { console.error(e); }
     setRaisingHand(false);
+  }
+
+  // Anexar documento a un recuadro de la linea de tiempo (archivo PDF/Word o enlace Drive)
+  async function saveDoc() {
+    if (!docFor || !docTitle.trim() || docSaving) return;
+    setDocSaving(true);
+    try {
+      if (docFile) {
+        const up = await uploadDocument({
+          workspaceId: discussion.workspaceId,
+          title: docTitle.trim(),
+          topic: docFor.topicTitle,
+          discussionId,
+          file: docFile,
+        });
+        if (up.ok && up.documentId && docFor.conclusionId) {
+          await fetch(`/api/rest/workspaces/documents/${up.documentId}/attach`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conclusionId: docFor.conclusionId }),
+            credentials: "include",
+          });
+        } else if (!up.ok) {
+          alert(up.error || "No se pudo subir el documento");
+        }
+      } else if (docUrl.trim()) {
+        const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/link-doc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: docTitle.trim(),
+            url: docUrl.trim(),
+            topicTitle: docFor.topicTitle,
+            conclusionId: docFor.conclusionId,
+          }),
+          credentials: "include",
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          alert(d.error || "No se pudo anexar el enlace");
+        }
+      }
+      await fetchDocs();
+      setDocFor(null); setDocTitle(""); setDocUrl(""); setDocFile(null);
+    } catch (e) { console.error(e); }
+    setDocSaving(false);
   }
 
   async function generatePartialSummary() {
@@ -596,53 +698,120 @@ export default function DiscussionRoom() {
           ) : <div className="border-t pt-3 text-center text-sm text-muted-foreground">La discusion esta cerrada. Revisa la relatoria.</div>}
         </div>
 
-        {/* Memoria de la discusion: recuadros por tema; dentro, los apuntes
-            (block de notas) de cada momento concluido por la IA */}
-        {topicsList.length > 0 && conclusions.length > 0 && (
+        {/* Linea de tiempo de la discusion: recuadros de temas conectados con
+            flechas; cada tema despliega sus recuadros de momento; los documentos
+            quedan visibles aun con el tema retraido */}
+        {topicsList.length > 0 && (
           <div className="mt-6">
             <h2 className="font-display text-lg flex items-center gap-2 mb-3">
-              <ScrollText className="h-5 w-5" /> Memoria de la discusion
+              <Milestone className="h-5 w-5" /> Linea de tiempo de la discusion
             </h2>
-            <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-y-3">
               {topicsList.map((t, ti) => {
                 const topicConcl = conclusions.filter((cn) => (cn.topicIndex ?? 0) === ti);
-                if (topicConcl.length === 0) return null;
+                const topicDocs = docsList.filter((d) => {
+                  if (d.conclusionId) {
+                    const cn = conclusions.find((x) => x.id === d.conclusionId);
+                    return cn ? (cn.topicIndex ?? 0) === ti : false;
+                  }
+                  return d.topic === t;
+                });
+                const expanded = expandedTopics[ti] ?? (ti === topicsList.length - 1);
+                const looseDocs = topicDocs.filter((d) => !d.conclusionId || !topicConcl.some((cn) => cn.id === d.conclusionId));
                 return (
-                  <Card key={ti} className="border-2 overflow-hidden">
-                    <div className="px-4 py-2 border-b bg-secondary/40 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full di-gradient text-white text-xs flex items-center justify-center shrink-0">{ti + 1}</span>
-                      <p className="font-display text-sm leading-tight">{t}</p>
+                  <Fragment key={ti}>
+                    {/* Recuadro principal del tema con su block de notas */}
+                    <div className="w-56 border-2 rounded-xl bg-card shadow-sm flex flex-col overflow-hidden self-stretch">
+                      <div className="di-gradient text-white px-3 py-1.5 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-white/25 text-[10px] flex items-center justify-center shrink-0">{ti + 1}</span>
+                        <p className="text-xs font-semibold leading-tight">{t}</p>
+                      </div>
+                      <div className="p-2.5 bg-amber-50/70 flex-1">
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          {topicInfos[ti] || "La IA esta redactando la nota del tema..."}
+                        </p>
+                      </div>
+                      <button
+                        className="text-[10px] py-1 border-t flex items-center justify-center gap-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => setExpandedTopics((prev) => ({ ...prev, [ti]: !expanded }))}
+                      >
+                        {expanded
+                          ? <><ChevronUp className="h-3 w-3" /> Retraer</>
+                          : <><ChevronDown className="h-3 w-3" /> Desplegar ({topicConcl.length + topicDocs.length})</>}
+                      </button>
                     </div>
-                    <CardContent className="pt-3 space-y-3">
-                      {topicConcl.map((cn) => {
-                        const splitAt = (cn.content || "").indexOf("## Compromisos asumidos");
-                        const main = splitAt >= 0 ? cn.content.slice(0, splitAt) : cn.content;
-                        const commitments = splitAt >= 0 ? cn.content.slice(splitAt).replace("## Compromisos asumidos", "") : null;
-                        return (
-                          <div key={cn.id} className="rounded-lg border bg-amber-50/70 p-3 shadow-sm">
-                            <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
-                            <p className="font-semibold text-sm leading-tight mt-0.5">{cn.title}</p>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              <MarkdownView content={main} />
-                            </div>
-                            {commitments && commitments.trim() && (
-                              <div className="mt-2 border-2 border-amber-400 bg-amber-50 rounded-lg p-2.5">
-                                <p className="text-[10px] uppercase tracking-wide text-amber-700 font-bold flex items-center gap-1">
-                                  <Flag className="h-3 w-3" /> Compromisos del momento
-                                </p>
-                                <div className="text-xs mt-1">
-                                  <MarkdownView content={commitments} />
-                                </div>
-                              </div>
-                            )}
+                    {/* Recuadros secundarios: uno por cada momento concluido del tema */}
+                    {expanded && topicConcl.map((cn) => {
+                      const splitAt = (cn.content || "").indexOf("## Compromisos asumidos");
+                      const main = splitAt >= 0 ? cn.content.slice(0, splitAt) : cn.content;
+                      const snippet = (main || "").replace(/[#*>`]/g, "").trim().slice(0, 140);
+                      const momentDocs = topicDocs.filter((d) => d.conclusionId === cn.id);
+                      return (
+                        <Fragment key={cn.id}>
+                          <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
+                          <div className="w-48 border-2 rounded-xl bg-amber-50/70 shadow-sm p-2.5 flex flex-col self-stretch">
+                            <p className="text-[9px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
+                            <p className="text-[11px] font-semibold leading-tight mt-0.5">{cn.title}</p>
+                            <p className="text-[10px] text-muted-foreground leading-snug mt-1 line-clamp-4">{snippet}</p>
+                            <button
+                              className="mt-auto pt-1.5 text-[10px] text-primary flex items-center gap-1 hover:underline"
+                              onClick={() => { setDocFor({ conclusionId: cn.id, topicTitle: t }); setDocTitle(""); setDocUrl(""); setDocFile(null); }}
+                            >
+                              <Paperclip className="h-3 w-3" /> Anexar documento
+                            </button>
                           </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
+                          {/* Documentos anclados a este momento: van a su lado */}
+                          {momentDocs.map((d) => (
+                            <Fragment key={d.id}>
+                              <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
+                              <a
+                                href={d.fileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
+                              >
+                                <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                                  {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                                  Documento
+                                </p>
+                                <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                                {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                              </a>
+                            </Fragment>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                    {/* Documentos sueltos del tema: siempre visibles, retraido o no */}
+                    {looseDocs.map((d) => (
+                      <Fragment key={d.id}>
+                        <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
+                        <a
+                          href={d.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
+                        >
+                          <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                            {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                            Documento
+                          </p>
+                          <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                          {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                        </a>
+                      </Fragment>
+                    ))}
+                    {/* Flecha hacia el siguiente recuadro de tema */}
+                    {ti < topicsList.length - 1 && (
+                      <div className="flex items-center px-0.5"><ChevronRight className="h-5 w-5 text-primary" /></div>
+                    )}
+                  </Fragment>
                 );
               })}
             </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              Cualquier usuario puede desplegar o retraer un tema, y anexar documentos (PDF, Word o enlace de Drive) a cualquier recuadro de momento.
+            </p>
           </div>
         )}
 
@@ -900,6 +1069,7 @@ export default function DiscussionRoom() {
                 {overlay.kind === "round" && "Nueva ronda de palabras"}
                 {overlay.kind === "decision" && "La ronda se completo"}
                 {overlay.kind === "waiting" && "Ronda de palabras completa"}
+                {overlay.kind === "welcomeback" && `De vuelta, ${user?.username ?? ""}`}
                 {overlay.kind === "finished" && "Moderacion finalizada"}
               </h2>
             </div>
@@ -964,6 +1134,14 @@ export default function DiscussionRoom() {
                     {handsCount === 0
                       ? "Nadie ha pedido la palabra aun"
                       : `${handsCount} participante${handsCount !== 1 ? "s" : ""} piden la palabra`}
+                  </p>
+                </>
+              )}
+              {overlay.kind === "welcomeback" && (
+                <>
+                  <p className="text-sm leading-relaxed whitespace-pre-line">{overlay.text}</p>
+                  <p className="text-center text-xs text-muted-foreground border rounded-lg bg-secondary/40 px-3 py-2">
+                    <strong>Tema {topicIdx + 1} de {topicsList.length}:</strong> {topicsList[topicIdx]} · <strong>{phaseName(currentPhase)}</strong>
                   </p>
                 </>
               )}
@@ -1052,6 +1230,45 @@ export default function DiscussionRoom() {
                     {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cerrar y generar relatoria"}
                   </Button>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Modal: anexar documento a un recuadro de la linea de tiempo */}
+      {docFor && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
+          <Card className="max-w-md w-full border-2 shadow-2xl">
+            <div className="di-gradient px-4 py-3 text-white rounded-t-xl flex items-center justify-between">
+              <p className="font-display text-lg flex items-center gap-2"><Paperclip className="h-5 w-5" /> Anexar documento</p>
+              <button onClick={() => setDocFor(null)} className="text-white/80 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 space-y-3">
+              <p className="text-xs text-muted-foreground">Tema del recuadro: <strong>{docFor.topicTitle}</strong></p>
+              <div className="space-y-1.5">
+                <Label>Tema general del documento *</Label>
+                <Input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} placeholder="Ej: Informe de asistencia social" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Subir archivo (PDF o Word)</Label>
+                <Input type="file" accept=".pdf,.doc,.docx" onChange={(e) => setDocFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <p className="text-center text-xs text-muted-foreground">— o —</p>
+              <div className="space-y-1.5">
+                <Label>Pegar enlace (Drive, etc.)</Label>
+                <Input value={docUrl} onChange={(e) => setDocUrl(e.target.value)} placeholder="https://drive.google.com/..." />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" className="flex-1" onClick={() => setDocFor(null)}>Cancelar</Button>
+                <Button
+                  className="flex-1 di-gradient text-white"
+                  disabled={!docTitle.trim() || (!docFile && !docUrl.trim()) || docSaving}
+                  onClick={saveDoc}
+                >
+                  {docSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Anexar"}
+                </Button>
               </div>
             </CardContent>
           </Card>
