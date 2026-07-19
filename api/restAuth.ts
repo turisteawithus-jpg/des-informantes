@@ -69,10 +69,10 @@ restAuth.post("/register", async (c) => {
 
     console.log("[register] Step 6: User created, ID:", result.insertId);
     const userId = Number(result.insertId);
-    
+
     console.log("[register] Step 7: Generating code");
     const code = generateVerificationCode();
-    
+
     console.log("[register] Step 8: Inserting code");
     await db.insert(emailVerificationCodes).values({
       userId,
@@ -83,7 +83,7 @@ restAuth.post("/register", async (c) => {
     console.log("[register] Step 9: Sending email to:", emailLower);
     console.log("[register] Step 9a: resendFrom:", env.resendFrom);
     console.log("[register] Step 9b: resendApiKey exists:", !!env.resendApiKey);
-    
+
     const sendResult = await sendEmail({
       to: emailLower,
       subject: "DES Informantes - Verifica tu correo",
@@ -189,7 +189,8 @@ restAuth.post("/verify-email", async (c) => {
 // Sesión actual
 restAuth.get("/me", async (c) => {
   const session = getSessionFromRequest(c.req.raw);
-  return c.json({ session });
+  if (!session) return c.json({ error: "No autorizado" }, 401);
+  return c.json(session);
 });
 
 // Cerrar sesión
@@ -202,7 +203,7 @@ restAuth.post("/logout", async (c) => {
    CHAT GLOBAL PÚBLICO
    ================================================================ */
 
-// GET /api/rest/global-chat — listar mensajes (público)
+// GET /api/rest/global-chat — listar mensajes (público, incluye pinned)
 restAuth.get("/global-chat", async (c) => {
   const db = getDb();
   const { globalChatMessages, users } = await import("@db/schema");
@@ -211,6 +212,7 @@ restAuth.get("/global-chat", async (c) => {
     .select({
       id: globalChatMessages.id,
       content: globalChatMessages.content,
+      pinned: globalChatMessages.pinned,
       createdAt: globalChatMessages.createdAt,
       userId: globalChatMessages.userId,
       username: users.username,
@@ -237,6 +239,61 @@ restAuth.post("/global-chat", async (c) => {
     userId: user.userId,
     content,
   });
+  return c.json({ ok: true });
+});
+
+/* ================================================================
+   MODERACION DEL CHAT GLOBAL (solo administrador general)
+   ================================================================ */
+
+// Fijar mensaje del chat global
+restAuth.post("/global-chat/:id/pin", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  if (user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  const msgId = Number(c.req.param("id"));
+  const db = getDb();
+  const { globalChatMessages } = await import("@db/schema");
+  await db.update(globalChatMessages).set({ pinned: true }).where(eq(globalChatMessages.id, msgId));
+  return c.json({ ok: true });
+});
+
+// Desfijar mensaje del chat global
+restAuth.post("/global-chat/:id/unpin", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  if (user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  const msgId = Number(c.req.param("id"));
+  const db = getDb();
+  const { globalChatMessages } = await import("@db/schema");
+  await db.update(globalChatMessages).set({ pinned: false }).where(eq(globalChatMessages.id, msgId));
+  return c.json({ ok: true });
+});
+
+// Editar mensaje del chat global
+restAuth.put("/global-chat/:id", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  if (user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  const msgId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const content = body.content?.trim();
+  if (!content) return c.json({ error: "Contenido vacio" }, 400);
+  const db = getDb();
+  const { globalChatMessages } = await import("@db/schema");
+  await db.update(globalChatMessages).set({ content }).where(eq(globalChatMessages.id, msgId));
+  return c.json({ ok: true });
+});
+
+// Eliminar mensaje del chat global
+restAuth.delete("/global-chat/:id", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  if (user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  const msgId = Number(c.req.param("id"));
+  const db = getDb();
+  const { globalChatMessages } = await import("@db/schema");
+  await db.delete(globalChatMessages).where(eq(globalChatMessages.id, msgId));
   return c.json({ ok: true });
 });
 

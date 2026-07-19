@@ -559,6 +559,26 @@ restWorkspaces.post("/discussion/:id/messages", async (c) => {
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   if (!disc || disc.status === "closed") return c.json({ error: "Discusion cerrada" }, 400);
   await db.insert(discussionMessages).values({ discussionId: discId, userId: user.userId, type: "text", content });
+  // Si el moderador IA esta activo, este mensaje cuenta como intervencion de la ronda
+  const modState = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (modState?.active) {
+    const newCompleted = modState.interventionsCompleted + 1;
+    await db.update(discussionModerationStates).set({
+      interventionsCompleted: newCompleted,
+      updatedAt: new Date(),
+    }).where(eq(discussionModerationStates.discussionId, discId));
+    return c.json({
+      ok: true,
+      moderation: {
+        active: true,
+        interventionsCompleted: newCompleted,
+        interventionsRequired: modState.interventionsRequired,
+        isRoundComplete: newCompleted >= modState.interventionsRequired,
+      },
+    });
+  }
   return c.json({ ok: true });
 });
 
