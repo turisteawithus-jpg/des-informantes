@@ -22,6 +22,9 @@ export const env = {
   resendApiKey: process.env.RESEND_API_KEY || "",
   resendFrom: process.env.RESEND_FROM || "TítereHub <onboarding@resend.dev>",
   appUrl: process.env.APP_URL || "http://localhost:3000",
+  // Cookie de sesion: false = funciona por HTTP y HTTPS (por defecto).
+  // Cuando la plataforma tenga HTTPS, poner COOKIE_SECURE=1 en el .env.
+  cookieSecure: process.env.COOKIE_SECURE === "1",
   gmailUser: process.env.GMAIL_USER || "",
   gmailAppPassword: process.env.GMAIL_APP_PASSWORD || "",
   groqApiKey: process.env.GROQ_API_KEY || "",

@@ -41,7 +41,7 @@ export function verifySessionToken(token: string): SessionPayload | null {
 export function sessionCookieHeader(token: string): string {
   return serializeCookie(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: env.isProduction,
+    secure: env.cookieSecure, // false por defecto: la sesion funciona por HTTP y HTTPS; activa COOKIE_SECURE=1 con HTTPS
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
@@ -51,7 +51,7 @@ export function sessionCookieHeader(token: string): string {
 export function clearSessionCookieHeader(): string {
   return serializeCookie(SESSION_COOKIE, "", {
     httpOnly: true,
-    secure: env.isProduction,
+    secure: env.cookieSecure, // false por defecto: la sesion funciona por HTTP y HTTPS; activa COOKIE_SECURE=1 con HTTPS
     sameSite: "lax",
     path: "/",
     maxAge: 0,
