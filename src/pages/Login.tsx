@@ -5,23 +5,45 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { trpc } from "@/providers/trpc";
-import { Loader2, LogIn } from "lucide-react";
+import { Loader2, LogIn, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const navigate = useNavigate();
-  const utils = trpc.useUtils();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const login = trpc.auth.login.useMutation({
-    onSuccess: () => { utils.auth.me.invalidate(); navigate("/dashboard"); },
-    onError: (e) => {
-      if (e.data?.code === "PRECONDITION_FAILED") { navigate(`/verify?email=${encodeURIComponent(email)}`); return; }
-      setError(e.message);
-    },
-  });
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (loading) return;
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/rest/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // Recarga completa para que toda la app tome la sesion nueva de una vez
+        window.location.href = "/dashboard";
+        return;
+      }
+      if (res.status === 403) {
+        // Correo sin verificar: lo enviamos a pantalla de verificacion
+        navigate(`/verify?email=${encodeURIComponent(email)}`);
+        return;
+      }
+      setError(data.error || "Correo o contrasena incorrectos.");
+    } catch {
+      setError("Error de conexion. Intenta de nuevo.");
+    }
+    setLoading(false);
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -33,11 +55,37 @@ export default function Login() {
             <CardTitle className="font-display text-2xl">Entrar a DES Informantes</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); setError(""); login.mutate({ email, password }); }}>
-              <div className="space-y-1.5"><Label>Correo electrónico</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
-              <div className="space-y-1.5"><Label>Contraseña</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
+            <form className="space-y-4" onSubmit={handleLogin}>
+              <div className="space-y-1.5">
+                <Label>Correo electrónico</Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" required autoComplete="email" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Contraseña</Label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Tu contrasena"
+                    required
+                    className="pr-10"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title={showPassword ? "Ocultar contrasena" : "Ver contrasena"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
               {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>}
-              <Button type="submit" className="w-full" disabled={login.isPending}>{login.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Entrando…</> : "Entrar"}</Button>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Entrando…</> : "Entrar"}
+              </Button>
               <p className="text-sm text-center text-muted-foreground">¿No tienes cuenta? <Link to="/register" className="text-primary font-medium hover:underline">Regístrate</Link></p>
             </form>
           </CardContent>
