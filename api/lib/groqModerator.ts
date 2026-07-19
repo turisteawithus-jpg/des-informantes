@@ -150,6 +150,97 @@ Responde SOLO con el parrafo del anuncio, nada mas.`;
   }
 }
 
+/**
+ * Bienvenida de reingreso: cuando un usuario vuelve a la discusion en un
+ * momento posterior al inicio, la IA lo recibe POR SU NOMBRE y lo ubica:
+ * en que momento va la discusion y, muy brevemente, que paso en los
+ * momentos anteriores de ESTE tema. Maximo ~80 palabras, un solo parrafo.
+ */
+export async function generateWelcomeBack(
+  username: string,
+  workspaceName: string,
+  discussionTitle: string,
+  topicTitle: string,
+  phaseName: string,
+  phaseObjective: string,
+  topicConclusions: { phaseName: string; title: string }[],
+): Promise<string | null> {
+  if (!env.groqApiKey) return null;
+  const history = topicConclusions.length > 0
+    ? topicConclusions.map((c) => `- ${c.phaseName}: ${c.title}`).join("\n")
+    : "(Aun no hay momentos concluidos en este tema.)";
+  const prompt = `Eres el Moderador IA de DES Informantes. El participante "${username}" acaba de REINGRESAR a la discusion "${discussionTitle}" (mesa "${workspaceName}").
+
+La discusion va en el tema "${topicTitle}", en el momento "${phaseName}" (proposito: ${phaseObjective}).
+
+Lo que ha pasado hasta ahora en ESTE tema:
+${history}
+
+Redacta en espanol el mensaje de bienvenida para ${username}:
+- Saludalo por su nombre de forma calida pero sobria.
+- Ubicalo: en que tema y momento va la discusion y que se busca en este momento.
+- Resume en UNA frase lo que ya se recorrio en este tema (sin listas).
+- Maximo 80 palabras, UN solo parrafo, sin Markdown ni titulos.
+- No menciones compromisos salvo que la historia los muestre explicitamente.
+
+Responde SOLO con el parrafo, nada mas.`;
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.groqApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.5,
+        max_tokens: 300,
+      }),
+    });
+    if (!res.ok) { console.error("[groq-bienvenida] Error HTTP:", res.status); return null; }
+    const data = await res.json();
+    const text: string = data.choices?.[0]?.message?.content || "";
+    return text.trim() || null;
+  } catch (e: any) {
+    console.error("[groq-bienvenida] Error:", e.message);
+    return null;
+  }
+}
+
+/**
+ * Block de notas del recuadro principal de un tema: explica brevemente
+ * que es la tematica y sus implicaciones para la discusion. ~60 palabras.
+ */
+export async function generateTopicInfo(
+  workspaceName: string,
+  discussionTitle: string,
+  topicTitle: string,
+): Promise<string | null> {
+  if (!env.groqApiKey) return null;
+  const prompt = `Eres el Moderador IA de DES Informantes. En la discusion "${discussionTitle}" (mesa "${workspaceName}") los participantes definieron el tema: "${topicTitle}".
+
+Redacta en espanol una nota breve (maximo 60 palabras, UN solo parrafo, sin Markdown) que explique que es este tema y por que importa tratarlo en esta discusion. Tono claro y profesional. Responde SOLO con el parrafo.`;
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.groqApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.4,
+        max_tokens: 220,
+      }),
+    });
+    if (!res.ok) { console.error("[groq-tema-info] Error HTTP:", res.status); return null; }
+    const data = await res.json();
+    const text: string = data.choices?.[0]?.message?.content || "";
+    return text.trim() || null;
+  } catch (e: any) {
+    console.error("[groq-tema-info] Error:", e.message);
+    return null;
+  }
+}
+
 export async function generateModeratorConclusion(
   workspaceName: string,
   discussionTitle: string,
