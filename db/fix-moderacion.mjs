@@ -65,6 +65,9 @@ await ensureColumn("discussion_moderation_states", "bridge_text", "text");
 // 2c. Columna hands_raised: manos levantadas (JSON con ids de usuario) durante la pausa de decision
 await ensureColumn("discussion_moderation_states", "hands_raised", "text");
 
+// 2d. Columna conclusion_id en documents: ancla el documento al recuadro (momento) del que nace
+await ensureColumn("documents", "conclusion_id", "bigint unsigned NULL");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (
