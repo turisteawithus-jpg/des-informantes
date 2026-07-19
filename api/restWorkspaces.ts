@@ -667,10 +667,7 @@ restWorkspaces.post("/discussion/:id/partial-summary", async (c) => {
   const db = getDb();
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
-  const member = await db.query.workspaceMembers.findFirst({
-    where: and(eq(workspaceMembers.workspaceId, disc.workspaceId), eq(workspaceMembers.userId, user.userId)),
-  });
-  if (member?.role !== "admin" && user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  // Cualquier participante puede pedir un resumen parcial
   const rows = await db.select({
     userId: discussionMessages.userId,
     type: discussionMessages.type,
@@ -737,10 +734,7 @@ restWorkspaces.post("/discussion/:id/activate-moderator", async (c) => {
   const db = getDb();
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
-  const member = await db.query.workspaceMembers.findFirst({
-    where: and(eq(workspaceMembers.workspaceId, disc.workspaceId), eq(workspaceMembers.userId, user.userId)),
-  });
-  if (member?.role !== "admin" && user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
+  // Cualquier participante autenticado puede activar el moderador
   const existing = await db.query.discussionModerationStates.findFirst({
     where: eq(discussionModerationStates.discussionId, discId),
   });
@@ -776,19 +770,17 @@ restWorkspaces.post("/discussion/:id/next-phase", async (c) => {
   if (!state || !state.active) return c.json({ error: "Moderador no activo" }, 400);
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
-  const member = await db.query.workspaceMembers.findFirst({
-    where: and(eq(workspaceMembers.workspaceId, disc.workspaceId), eq(workspaceMembers.userId, user.userId)),
-  });
-  if (member?.role !== "admin" && user.role !== "admin") return c.json({ error: "No tienes permiso" }, 403);
-  if (conclusionTitle && conclusionContent) {
-    await db.insert(moderationConclusions).values({
-      discussionId: discId,
-      phase: state.currentPhase,
-      topicIndex: state.currentTopicIndex,
-      title: conclusionTitle,
-      content: conclusionContent,
-    });
+  // Cualquier participante puede avanzar de fase, pero SIEMPRE dejando la conclusion de la fase
+  if (!conclusionTitle?.trim() || !conclusionContent?.trim()) {
+    return c.json({ error: "Registra la conclusion de la fase para poder avanzar" }, 400);
   }
+  await db.insert(moderationConclusions).values({
+    discussionId: discId,
+    phase: state.currentPhase,
+    topicIndex: state.currentTopicIndex,
+    title: conclusionTitle.trim(),
+    content: conclusionContent.trim(),
+  });
   const phases = [
     "apertura", "contextualizacion", "comprension", "sintesis_parcial",
     "profundizacion", "coincidencias_diferencias", "alternativas",
