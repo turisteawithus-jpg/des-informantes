@@ -896,12 +896,26 @@ restWorkspaces.get("/discussion/:id/topic-info", async (c) => {
   try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
   const title = topics[index];
   if (!title) return c.json({ error: "Tema no encontrado" }, 404);
+
+  // El recuadro principal solo muestra el NOMBRE mientras el tema esta en curso
+  // o pendiente; la nota descriptiva aparece cuando el tema ya concluyo.
+  const finishedAll = !state.active && topics.length > 0;
+  const isTopicDone = index < state.currentTopicIndex || finishedAll;
+  if (!isTopicDone) {
+    return c.json({ desc: null, status: index === state.currentTopicIndex ? "en-curso" : "pendiente" });
+  }
+
   const cacheKey = `${discId}:${index}:${title}`;
   const cached = topicInfoCache.get(cacheKey);
   if (cached) return c.json({ desc: cached });
   const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
   const ws = disc ? await db.query.workspaces.findFirst({ where: eq(workspaces.id, disc.workspaceId) }) : null;
-  const desc = await generateTopicInfo(ws?.name || "Proyecto", disc?.title || "Discusion", title);
+  const conclusions = await db.query.moderationConclusions.findMany({
+    where: eq(moderationConclusions.discussionId, discId),
+    orderBy: [asc(moderationConclusions.createdAt)],
+  });
+  const titles = conclusions.filter((cn) => (cn.topicIndex ?? 0) === index).map((cn) => cn.title);
+  const desc = await generateTopicInfo(ws?.name || "Proyecto", disc?.title || "Discusion", title, titles);
   if (!desc) return c.json({ error: "No se pudo generar la nota" }, 500);
   topicInfoCache.set(cacheKey, desc);
   return c.json({ desc });
@@ -948,6 +962,58 @@ restWorkspaces.post("/discussion/:id/link-doc", async (c) => {
   });
   console.log(`[docs] Discusion ${discId}: documento enlazado "${title}"`);
   return c.json({ ok: true, documentId: Number(result.insertId) });
+});
+
+// POST /discussion/:id/editor-doc — crear un documento en linea (editable dentro de la plataforma)
+restWorkspaces.post("/discussion/:id/editor-doc", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const title = body.title?.trim();
+  if (!title) return c.json({ error: "El tema general del documento es obligatorio" }, 400);
+  const db = getDb();
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  const [result] = await db.insert(documents).values({
+    workspaceId: disc.workspaceId,
+    discussionId: discId,
+    conclusionId: body.conclusionId ? Number(body.conclusionId) : null,
+    uploadedBy: user.userId,
+    title: title.slice(0, 255),
+    topic: body.topicTitle?.slice(0, 120) || null,
+    fileName: "editor-en-linea",
+    fileUrl: "",
+    mimeType: "editor/html",
+    sizeBytes: 0,
+    content: "<p></p>",
+  });
+  console.log(`[docs] Discusion ${discId}: documento en linea creado "${title}"`);
+  return c.json({ ok: true, documentId: Number(result.insertId) });
+});
+
+// GET /documents/:docId/content — leer el contenido del documento en linea
+restWorkspaces.get("/documents/:docId/content", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const docId = Number(c.req.param("docId"));
+  const db = getDb();
+  const doc = await db.query.documents.findFirst({ where: eq(documents.id, docId) });
+  if (!doc) return c.json({ error: "Documento no encontrado" }, 404);
+  return c.json({ id: doc.id, title: doc.title, topic: doc.topic, content: doc.content ?? "" });
+});
+
+// PUT /documents/:docId/content — guardar el contenido (autoguardado del editor)
+restWorkspaces.put("/documents/:docId/content", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const docId = Number(c.req.param("docId"));
+  const body = await c.req.json();
+  const db = getDb();
+  await db.update(documents)
+    .set({ content: String(body.content ?? "").slice(0, 200000) })
+    .where(eq(documents.id, docId));
+  return c.json({ ok: true });
 });
 
 // POST /documents/:docId/attach — anclar un documento ya subido al recuadro (momento) correspondiente
