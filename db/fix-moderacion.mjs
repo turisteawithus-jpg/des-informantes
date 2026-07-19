@@ -59,6 +59,9 @@ await conn.query(`
 `);
 console.log("OK: tabla discussion_moderation_states lista");
 
+// 2b. Columna bridge_text: contexto que la IA redacta para abrir cada nuevo momento
+await ensureColumn("discussion_moderation_states", "bridge_text", "text");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (

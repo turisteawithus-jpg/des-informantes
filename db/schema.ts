@@ -163,6 +163,7 @@ export const discussionModerationStates = mysqlTable("discussion_moderation_stat
   ]).notNull().default("apertura"),
   topics: text("topics"),
   currentTopicIndex: int("current_topic_index").notNull().default(0),
+  bridgeText: text("bridge_text"),
   wordRound: int("word_round").notNull().default(1),
   interventionsRequired: int("interventions_required").notNull().default(5),
   interventionsCompleted: int("interventions_completed").notNull().default(0),
