@@ -14,19 +14,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Plus, Loader2, MessageSquare, ArrowLeft, Users, CircleDot, CircleCheck,
-  CheckCircle, XCircle, DoorOpen, UserCheck,
+  CheckCircle, XCircle, DoorOpen, UserCheck, Sparkles, Flag,
 } from "lucide-react";
+
+// Verde biche suave: relleno de las barras de progreso del moderador
+const VERDE_BICHE = "#AFC97F";
 
 export default function WorkspaceView() {
   const { id } = useParams<{ id: string }>();
   const workspaceId = Number(id);
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
 
   const [ws, setWs] = useState<any>(null);
   const [discussions, setDiscussions] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
+  const [progressMap, setProgressMap] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(true);
 
   // Crear discusion
@@ -40,9 +44,16 @@ export default function WorkspaceView() {
     fetchAll();
   }, [isAuthenticated, workspaceId]);
 
+  // Las barras de progreso se actualizan solas cada 10 segundos
+  useEffect(() => {
+    if (!isAuthenticated || !workspaceId) return;
+    const iv = setInterval(fetchProgress, 10000);
+    return () => clearInterval(iv);
+  }, [isAuthenticated, workspaceId]);
+
   async function fetchAll() {
     setLoading(true);
-    await Promise.all([fetchWorkspace(), fetchDiscussions(), fetchMembers(), fetchJoinRequests()]);
+    await Promise.all([fetchWorkspace(), fetchDiscussions(), fetchMembers(), fetchJoinRequests(), fetchProgress()]);
     setLoading(false);
   }
 
@@ -57,6 +68,18 @@ export default function WorkspaceView() {
     try {
       const res = await fetch(`/api/rest/workspaces/${workspaceId}/discussions`, { credentials: "include" });
       if (res.ok) setDiscussions(await res.json());
+    } catch (e) { console.error(e); }
+  }
+
+  async function fetchProgress() {
+    try {
+      const res = await fetch(`/api/rest/workspaces/${workspaceId}/discussions-progress`, { credentials: "include" });
+      if (res.ok) {
+        const list: any[] = await res.json();
+        const map: Record<number, any> = {};
+        for (const p of list) map[p.discussionId] = p;
+        setProgressMap(map);
+      }
     } catch (e) { console.error(e); }
   }
 
@@ -127,8 +150,8 @@ export default function WorkspaceView() {
   if (!isAuthenticated) { navigate("/login"); return null; }
   if (!ws) return <div className="min-h-screen flex flex-col"><AppHeader /><main className="flex-1 flex items-center justify-center text-muted-foreground">Mesa no encontrada.</main></div>;
 
-  const isMember = !!ws.memberRole;
-  const isWsAdmin = ws.memberRole === "admin";
+  const isMember = !!ws.memberRole || isAdmin;
+  const isWsAdmin = ws.memberRole === "admin" || isAdmin;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -199,20 +222,58 @@ export default function WorkspaceView() {
               </div>
               {discussions.length === 0 && <Card className="border-dashed"><CardContent className="py-10 text-center text-muted-foreground"><MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-50" />Aun no hay discusiones. Abre la primera.</CardContent></Card>}
               <div className="grid md:grid-cols-2 gap-4">
-                {discussions.map((d: any) => (
-                  <Card key={d.id} className="border-2 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate(`/discussion/${d.id}`)}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <CardTitle className="font-display text-lg leading-tight">{d.title}</CardTitle>
-                        {d.status === "open" ? <Badge className="bg-green-600 gap-1 shrink-0"><CircleDot className="h-3 w-3" /> Abierta</Badge> : <Badge variant="secondary" className="gap-1 shrink-0"><CircleCheck className="h-3 w-3" /> Cerrada</Badge>}
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground line-clamp-2">{d.description || "Sin agenda"}</p>
-                      <p className="text-xs text-muted-foreground mt-2">{new Date(d.createdAt).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-                    </CardContent>
-                  </Card>
-                ))}
+                {discussions.map((d: any) => {
+                  const p = progressMap[d.id];
+                  const pct = p ? Math.round((p.progress ?? 0) * 100) : 0;
+                  return (
+                    <Card key={d.id} className="border-2 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate(`/discussion/${d.id}`)}>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <CardTitle className="font-display text-lg leading-tight">{d.title}</CardTitle>
+                          {d.status === "open" ? <Badge className="bg-green-600 gap-1 shrink-0"><CircleDot className="h-3 w-3" /> Abierta</Badge> : <Badge variant="secondary" className="gap-1 shrink-0"><CircleCheck className="h-3 w-3" /> Cerrada</Badge>}
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-muted-foreground line-clamp-2">{d.description || "Sin agenda"}</p>
+                        <p className="text-xs text-muted-foreground mt-2">{new Date(d.createdAt).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+
+                        {/* Barra de progreso del Moderador IA */}
+                        {p?.started && (
+                          <div className="mt-3 pt-3 border-t">
+                            <div className="h-2.5 rounded-full bg-secondary overflow-hidden shadow-inner">
+                              <div
+                                className={`h-full rounded-full transition-all duration-700 ${p.topicsCount === 0 && p.active ? "animate-pulse" : ""}`}
+                                style={{
+                                  width: p.topicsCount === 0 && p.active ? "18%" : `${Math.max(pct, 4)}%`,
+                                  backgroundColor: VERDE_BICHE,
+                                }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <p className="text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
+                                {p.finished ? (
+                                  <><Flag className="h-3 w-3 shrink-0" style={{ color: VERDE_BICHE }} /> <span>Moderacion finalizada · memoria completa guardada</span></>
+                                ) : p.topicsCount === 0 ? (
+                                  <><Sparkles className="h-3 w-3 shrink-0" style={{ color: VERDE_BICHE }} /> <span>Moderador activo · ronda de propuesta de temas</span></>
+                                ) : (
+                                  <><Sparkles className="h-3 w-3 shrink-0" style={{ color: VERDE_BICHE }} />
+                                    <span className="truncate">
+                                      Tema {Math.min(p.currentTopicIndex + 1, p.topicsCount)} de {p.topicsCount}
+                                      {p.currentTopic ? `: ${p.currentTopic}` : ""} · {p.phaseName}
+                                    </span>
+                                  </>
+                                )}
+                              </p>
+                              {p.topicsCount > 0 && (
+                                <span className="text-[11px] font-semibold shrink-0" style={{ color: "#7A9B54" }}>{pct}%</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </TabsContent>
 

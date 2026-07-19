@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router";
 import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
@@ -11,13 +12,8 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
+  CheckCircle2, ListOrdered,
 } from "lucide-react";
-
-const PHASE_ORDER = [
-  "apertura", "contextualizacion", "comprension", "sintesis_parcial",
-  "profundizacion", "coincidencias_diferencias", "alternativas",
-  "evaluacion", "acuerdo", "conclusion", "compromisos",
-];
 
 const PHASE_INFO: Record<string, { name: string; desc: string }> = {
   apertura: { name: "Apertura", desc: "Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
@@ -64,7 +60,7 @@ export default function DiscussionRoom() {
   // Moderador IA (automatico, por temas)
   const [modState, setModState] = useState<any>(null);
   const [modOpen, setModOpen] = useState(false);
-  const [modTab, setModTab] = useState<"relatoria" | "resumenes">("relatoria");
+  const [modTab, setModTab] = useState<"temas" | "relatoria" | "resumenes">("temas");
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [addingTopic, setAddingTopic] = useState(false);
@@ -344,10 +340,6 @@ export default function DiscussionRoom() {
   // La relatoria en proceso muestra SOLO las conclusiones del tema actual (se reinicia por tema)
   const topicConclusions = conclusions.filter((cn) => (cn.topicIndex ?? 0) === topicIdx);
   const selectingTopics = modActiveNow && topicsList.length === 0;
-  const phaseIdx = Math.max(0, PHASE_ORDER.indexOf(currentPhase ?? "apertura"));
-  const topicProgressPct = topicsList.length > 0
-    ? Math.min(100, Math.round(((topicIdx + phaseIdx / PHASE_ORDER.length) / topicsList.length) * 100))
-    : 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -376,44 +368,17 @@ export default function DiscussionRoom() {
         </div>
       </div>
 
-      {/* Barra de progreso de temas */}
-      {topicsList.length > 0 && (
-        <div className="border-b bg-card">
-          <div className="max-w-4xl mx-auto px-4 py-2 flex items-center gap-3">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Tema {Math.min(topicIdx + 1, topicsList.length)} de {topicsList.length}:{" "}
-              <strong className="text-foreground">{topicsList[topicIdx]}</strong>
-            </span>
-            <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
-              <div className="h-2 di-gradient rounded-full transition-all" style={{ width: `${topicProgressPct}%` }} />
-            </div>
-            <span className="text-[10px] text-muted-foreground">{topicProgressPct}%</span>
-            {isOpen && (
-              <Button size="sm" variant="ghost" className="text-xs gap-1 h-7" onClick={() => setAddingTopic(!addingTopic)}>
-                <Plus className="h-3.5 w-3.5" /> Tema
-              </Button>
-            )}
-          </div>
-          {addingTopic && (
-            <div className="max-w-4xl mx-auto px-4 pb-2 flex gap-2">
-              <Input
-                value={newTopic}
-                onChange={(e) => setNewTopic(e.target.value)}
-                placeholder="Titulo del nuevo tema..."
-                className="h-8 text-sm"
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } }}
-                autoFocus
-              />
-              <Button size="sm" className="h-8" onClick={addTopic} disabled={!newTopic.trim() || savingTopic}>
-                {savingTopic ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Agregar"}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* La barra de progreso de la discusion vive ahora en las tarjetas de la mesa (WorkspaceView) */}
 
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-4">
         <div className="flex flex-col min-h-[60vh]">
+          {selectingTopics && (
+            <Card className="border-2 border-primary/60 bg-primary/5 mb-3">
+              <CardContent className="py-3 px-4 text-sm text-center leading-relaxed">
+                <strong className="font-display">Ronda de propuesta de temas:</strong> los temas los definen ustedes. Escribe tus propuestas en el chat o agregalas desde la pestana <strong>Temas</strong> de la ventana flotante. Cuando la ronda termine, la IA organizara <strong>solo lo que el grupo propuso</strong>.
+              </CardContent>
+            </Card>
+          )}
           {pinnedMessages.length > 0 && (
             <div className="mb-3 space-y-2">
               <p className="text-xs font-medium text-amber-600 flex items-center gap-1"><Pin className="h-3 w-3" /> MENSAJES FIJADOS</p>
@@ -540,7 +505,9 @@ export default function DiscussionRoom() {
         )}
       </div>
 
-      {/* Ventana flotante: Relatoria en proceso (conclusiones del tema actual) */}
+      {/* Ventana flotante: Temas + Relatoria en proceso. Va en portal directo al body
+          para que NADA la desplace: queda fija aunque se haga scroll. */}
+      {createPortal(
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
         {modOpen && (
           <Card className="w-96 border-2 shadow-2xl">
@@ -549,11 +516,74 @@ export default function DiscussionRoom() {
               <button onClick={() => setModOpen(false)} className="text-white/80 hover:text-white" title="Cerrar panel"><X className="h-4 w-4" /></button>
             </div>
             <div className="flex border-b text-xs">
+              <button onClick={() => setModTab("temas")} className={`flex-1 py-2 font-medium flex items-center justify-center gap-1 ${modTab === "temas" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}><ListOrdered className="h-3 w-3" /> Temas</button>
               <button onClick={() => setModTab("relatoria")} className={`flex-1 py-2 font-medium ${modTab === "relatoria" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Conclusiones IA</button>
               <button onClick={() => setModTab("resumenes")} className={`flex-1 py-2 font-medium ${modTab === "resumenes" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Resumenes</button>
             </div>
             <CardContent className="pt-3 space-y-3 max-h-[55vh] overflow-y-auto">
-              {modTab === "resumenes" ? (
+              {modTab === "temas" ? (
+                <>
+                  {!modState ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Los temas de la discusion los proponen los participantes, no la IA. Activa el Moderador IA y escribe tus propuestas en el chat: la IA solo las organiza y guia el trabajo tema por tema.
+                      </p>
+                      <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
+                        <Sparkles className="h-3.5 w-3.5" /> Activar moderador
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {topicsList.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Aun no hay temas definidos. Escribe tus propuestas en el chat o agrega un tema aqui abajo. La IA organizara <strong>solo los temas que ustedes propongan</strong>.
+                        </p>
+                      ) : (
+                        <ol className="space-y-1.5">
+                          {topicsList.map((t, i) => {
+                            const done = i < topicIdx || !modActiveNow;
+                            const current = i === topicIdx && modActiveNow;
+                            return (
+                              <li key={i} className={`flex items-center gap-2 border rounded-lg px-2.5 py-1.5 ${current ? "border-primary bg-primary/5" : "bg-secondary/40"}`}>
+                                {done ? (
+                                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                                ) : (
+                                  <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center shrink-0 ${current ? "di-gradient text-white" : "bg-secondary text-muted-foreground"}`}>{i + 1}</span>
+                                )}
+                                <span className={`text-xs leading-tight ${current ? "font-semibold" : ""} ${done ? "text-muted-foreground line-through" : ""}`}>{t}</span>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                      {isOpen && (
+                        addingTopic ? (
+                          <div className="flex gap-1.5">
+                            <Input
+                              value={newTopic}
+                              onChange={(e) => setNewTopic(e.target.value)}
+                              placeholder="Titulo del nuevo tema..."
+                              className="h-8 text-sm"
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } }}
+                              autoFocus
+                            />
+                            <Button size="sm" className="h-8 px-2.5" onClick={addTopic} disabled={!newTopic.trim() || savingTopic}>
+                              {savingTopic ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "OK"}
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { setAddingTopic(false); setNewTopic(""); }}>
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button size="sm" variant="outline" className="w-full gap-1 text-xs" onClick={() => setAddingTopic(true)}>
+                            <Plus className="h-3.5 w-3.5" /> Agregar tema
+                          </Button>
+                        )
+                      )}
+                    </>
+                  )}
+                </>
+              ) : modTab === "resumenes" ? (
                 <>
                   {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes parciales que la IA genera de la discusion.</p>}
                   {summaries.map((s) => (
@@ -586,7 +616,7 @@ export default function DiscussionRoom() {
                           {selectingTopics ? (
                             <>
                               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Momento actual</p>
-                              <p className="font-display text-base leading-tight">Seleccion de temas</p>
+                              <p className="font-display text-base leading-tight">Propuesta de temas</p>
                               {roundComplete ? (
                                 <p className="text-xs text-primary flex items-center gap-1.5 mt-1">
                                   <Loader2 className="h-3 w-3 animate-spin" /> La IA esta organizando los temas propuestos...
@@ -650,7 +680,7 @@ export default function DiscussionRoom() {
           <Sparkles className="h-4 w-4" />
           {!modState ? "Moderador IA"
             : roundComplete ? "La IA esta trabajando..."
-            : selectingTopics ? `Seleccion de temas`
+            : selectingTopics ? `Propuesta de temas`
             : modActiveNow ? `Tema ${topicIdx + 1}/${topicsList.length}: ${phaseName(currentPhase)}`
             : "Relatoria en proceso"}
           {modActiveNow && !roundComplete && (
@@ -658,17 +688,19 @@ export default function DiscussionRoom() {
           )}
           {modActiveNow && roundComplete && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         </Button>
-      </div>
+      </div>,
+      document.body,
+      )}
 
-      {/* Anuncios grandes del Moderador IA */}
-      {overlay && (
+      {/* Anuncios grandes del Moderador IA (portal: siempre por encima de todo) */}
+      {overlay && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
           <Card className="max-w-2xl w-full border-2 shadow-2xl">
             <div className="di-gradient px-6 py-6 text-white rounded-t-xl text-center">
               <Sparkles className="h-10 w-10 mx-auto mb-2" />
               <p className="text-[11px] uppercase tracking-[0.25em] opacity-85">Moderador IA</p>
               <h2 className="font-display text-4xl leading-tight font-bold">
-                {overlay.kind === "activated" && "Seleccion de temas"}
+                {overlay.kind === "activated" && "Propuesta de temas"}
                 {overlay.kind === "topics" && "Temas de la discusion"}
                 {overlay.kind === "topic" && `Tema ${topicIdx + 1}: ${topicsList[topicIdx] ?? ""}`}
                 {overlay.kind === "phase" && `Fase: ${phaseName(overlay.phase)}`}
@@ -678,8 +710,8 @@ export default function DiscussionRoom() {
             <CardContent className="pt-5 space-y-4 max-h-[60vh] overflow-y-auto">
               {overlay.kind === "activated" && (
                 <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                  Iniciamos con la <strong>seleccion de los temas</strong> de la discusion. En esta primera ronda de palabras, cada participante puede <strong>proponer los temas</strong> que quiere tratar.
-                  <br /><br />Cuando la ronda termine, la IA organizara los temas propuestos y comenzaremos con el primero.
+                  Iniciamos con la <strong>propuesta de temas</strong>. En esta primera ronda de palabras, cada participante escribe en el chat <strong>los temas que quiere tratar</strong>. La IA <strong>no propone temas</strong>: solo organiza los que ustedes definan.
+                  <br /><br />Cuando la ronda termine, la IA ordenara los temas propuestos y comenzaremos con el primero. Tambien puedes agregar temas en cualquier momento desde la pestana <strong>Temas</strong> de la ventana flotante.
                 </p>
               )}
               {overlay.kind === "topics" && (
@@ -694,7 +726,7 @@ export default function DiscussionRoom() {
                     ))}
                   </ol>
                   <p className="text-center text-sm leading-relaxed">
-                    Comenzamos con el <strong>Tema 1: {topicsList[0]}</strong>. Recuerda que puedes agregar mas temas con el boton <strong>"+ Tema"</strong> en cualquier momento.
+                    Comenzamos con el <strong>Tema 1: {topicsList[0]}</strong>. Si el grupo quiere tratar algo mas, puedes agregar temas en cualquier momento desde la pestana <strong>Temas</strong> de la ventana flotante.
                   </p>
                 </>
               )}
@@ -759,7 +791,8 @@ export default function DiscussionRoom() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
