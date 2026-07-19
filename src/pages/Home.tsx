@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Mic,
@@ -18,6 +19,10 @@ import {
   ArrowRight,
   Newspaper,
   Loader2,
+  Pin,
+  PinOff,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 const features = [
@@ -33,11 +38,13 @@ const features = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAdmin } = useAuth();
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function fetchMessages() {
@@ -70,6 +77,42 @@ export default function Home() {
     setSending(false);
   }
 
+  async function togglePin(msgId: number) {
+    const msg = messages.find((m) => m.id === msgId);
+    if (!msg) return;
+    const endpoint = msg.pinned
+      ? `/api/rest/global-chat/${msgId}/unpin`
+      : `/api/rest/global-chat/${msgId}/pin`;
+    try {
+      const res = await fetch(endpoint, { method: "POST", credentials: "include" });
+      if (res.ok) fetchMessages();
+    } catch (e) { console.error(e); }
+  }
+
+  async function deleteMsg(msgId: number) {
+    if (!confirm("Eliminar este mensaje del chat general?")) return;
+    try {
+      const res = await fetch(`/api/rest/global-chat/${msgId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) fetchMessages();
+    } catch (e) { console.error(e); }
+  }
+
+  async function editMsg(msgId: number) {
+    if (!editText.trim()) return;
+    try {
+      const res = await fetch(`/api/rest/global-chat/${msgId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editText.trim() }),
+        credentials: "include",
+      });
+      if (res.ok) { setEditingId(null); setEditText(""); fetchMessages(); }
+    } catch (e) { console.error(e); }
+  }
+
   useEffect(() => {
     fetchMessages();
     const interval = setInterval(fetchMessages, 4000);
@@ -79,6 +122,9 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  const pinnedMessages = messages.filter((m) => m.pinned);
+  const normalMessages = [...messages].reverse().filter((m) => !m.pinned);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -123,14 +169,79 @@ export default function Home() {
               {!loading && messages.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-8">Se el primero en escribir en el chat general.</p>
               )}
-              {messages.length > 0 && [...messages].reverse().map((m: any) => (
+              {pinnedMessages.length > 0 && (
+                <div className="space-y-2 pb-2 border-b border-amber-200">
+                  <p className="text-[10px] font-medium text-amber-600 flex items-center gap-1"><Pin className="h-3 w-3" /> FIJADOS POR EL ADMINISTRADOR</p>
+                  {pinnedMessages.map((m: any) => (
+                    <div key={`pinned-${m.id}`} className="flex gap-2">
+                      <div className="w-7 h-7 rounded-full bg-amber-200 flex items-center justify-center shrink-0 text-xs font-bold text-amber-700">
+                        {m.username?.[0]?.toUpperCase() || "?"}
+                      </div>
+                      <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-1.5 text-sm max-w-[85%] relative group">
+                        {isAdmin && (
+                          <div className="absolute -top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                            <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-amber-100" title="Desfijar" onClick={() => togglePin(m.id)}>
+                              <PinOff className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-blue-100 text-blue-500" title="Editar" onClick={() => { setEditingId(m.id); setEditText(m.content || ""); }}>
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-red-100 text-red-500" title="Eliminar" onClick={() => deleteMsg(m.id)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                        <span className="font-semibold text-xs text-amber-700">{m.username || "Usuario"}</span>
+                        {editingId === m.id ? (
+                          <div className="space-y-2 min-w-[260px] py-1">
+                            <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={3} className="text-sm" autoFocus />
+                            <div className="flex gap-2">
+                              <Button size="sm" className="h-7 text-xs" onClick={() => editMsg(m.id)}>Guardar</Button>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingId(null)}>Cancelar</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-foreground/90">{m.content}</p>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {m.createdAt ? new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : ""}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {normalMessages.map((m: any) => (
                 <div key={m.id} className="flex gap-2">
                   <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
                     {m.username?.[0]?.toUpperCase() || "?"}
                   </div>
-                  <div className="bg-card border rounded-lg px-3 py-1.5 text-sm max-w-[85%]">
+                  <div className="bg-card border rounded-lg px-3 py-1.5 text-sm max-w-[85%] relative group">
+                    {isAdmin && (
+                      <div className="absolute -top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-amber-100" title="Fijar" onClick={() => togglePin(m.id)}>
+                          <Pin className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-blue-100 text-blue-500" title="Editar" onClick={() => { setEditingId(m.id); setEditText(m.content || ""); }}>
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 bg-background/90 hover:bg-red-100 text-red-500" title="Eliminar" onClick={() => deleteMsg(m.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                     <span className="font-semibold text-xs text-primary">{m.username || "Usuario"}</span>
-                    <p className="text-foreground/90">{m.content}</p>
+                    {editingId === m.id ? (
+                      <div className="space-y-2 min-w-[260px] py-1">
+                        <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={3} className="text-sm" autoFocus />
+                        <div className="flex gap-2">
+                          <Button size="sm" className="h-7 text-xs" onClick={() => editMsg(m.id)}>Guardar</Button>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingId(null)}>Cancelar</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-foreground/90">{m.content}</p>
+                    )}
                     <span className="text-[10px] text-muted-foreground">
                       {m.createdAt ? new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : ""}
                     </span>

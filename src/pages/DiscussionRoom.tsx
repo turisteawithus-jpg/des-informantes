@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { MarkdownView } from "@/components/MarkdownView";
@@ -11,8 +12,36 @@ import { useAuth } from "@/hooks/useAuth";
 import { uploadAudio } from "@/lib/upload";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
-  ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil,
+  ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X,
 } from "lucide-react";
+
+const PHASE_ORDER = [
+  "apertura", "contextualizacion", "comprension", "sintesis_parcial",
+  "profundizacion", "coincidencias_diferencias", "alternativas",
+  "evaluacion", "acuerdo", "conclusion", "compromisos",
+];
+
+const PHASE_INFO: Record<string, { name: string; desc: string }> = {
+  apertura: { name: "Apertura", desc: "Bienvenida. Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
+  contextualizacion: { name: "Contextualizacion", desc: "Se ubica el tema en su contexto: antecedentes, datos y situacion actual del asunto a tratar." },
+  comprension: { name: "Comprension", desc: "Cada participante expresa su entendimiento del tema. Se aclaran dudas y terminos." },
+  sintesis_parcial: { name: "Sintesis parcial", desc: "El moderador resume lo dicho hasta ahora y el grupo verifica que todos esten en la misma pagina." },
+  profundizacion: { name: "Profundizacion", desc: "Se exploran en detalle los puntos mas importantes o que generan mas debate." },
+  coincidencias_diferencias: { name: "Coincidencias y diferencias", desc: "Se identifican abiertamente los acuerdos y desacuerdos entre los participantes." },
+  alternativas: { name: "Alternativas", desc: "Se proponen opciones y soluciones para cada punto de discusion sobre la mesa." },
+  evaluacion: { name: "Evaluacion", desc: "Se valoran las alternativas propuestas: ventajas, desventajas y viabilidad real." },
+  acuerdo: { name: "Acuerdo", desc: "Se construye consenso alrededor de las mejores alternativas disponibles." },
+  conclusion: { name: "Conclusion", desc: "Se formulan las conclusiones finales de la discusion." },
+  compromisos: { name: "Compromisos", desc: "Se definen compromisos concretos, responsables y proximos pasos." },
+};
+
+function phaseName(key: string | undefined) {
+  return (key && PHASE_INFO[key]?.name) || "Apertura";
+}
+function nextPhaseKey(key: string | undefined) {
+  const idx = PHASE_ORDER.indexOf(key || "apertura");
+  return PHASE_ORDER[Math.min(idx + 1, PHASE_ORDER.length - 1)];
+}
 
 export default function DiscussionRoom() {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +61,17 @@ export default function DiscussionRoom() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Moderador IA
+  const [modState, setModState] = useState<any>(null);
+  const [modOpen, setModOpen] = useState(false);
+  const [overlay, setOverlay] = useState<{ kind: "activated" | "phase" | "roundComplete"; phase?: string } | null>(null);
+  const [conclusionTitle, setConclusionTitle] = useState("");
+  const [conclusionContent, setConclusionContent] = useState("");
+  const [advancing, setAdvancing] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const prevPhaseRef = useRef<string | null>(null);
+  const prevRoundCompleteRef = useRef(false);
 
   // Puede moderar: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -77,9 +117,21 @@ export default function DiscussionRoom() {
     } catch (e) { console.error(e); }
   }
 
+  async function fetchModState() {
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/moderation-state`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setModState(data);
+      } else {
+        setModState(null);
+      }
+    } catch (e) { console.error(e); }
+  }
+
   async function loadAll() {
     setLoading(true);
-    await Promise.all([fetchDiscussion(), fetchMessages(), fetchSummaries(), fetchRelatoria()]);
+    await Promise.all([fetchDiscussion(), fetchMessages(), fetchSummaries(), fetchRelatoria(), fetchModState()]);
     setLoading(false);
   }
 
@@ -93,6 +145,7 @@ export default function DiscussionRoom() {
     const iv = setInterval(() => {
       fetchMessages();
       fetchSummaries();
+      fetchModState();
     }, 4000);
     return () => clearInterval(iv);
   }, [isAuthenticated, isOpen, discussionId]);
@@ -104,6 +157,25 @@ export default function DiscussionRoom() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  // Detectar cambio de fase -> anuncio grande para todos
+  const currentPhase: string | undefined = modState?.state?.currentPhase;
+  useEffect(() => {
+    if (!currentPhase || !modState?.state?.active) { prevPhaseRef.current = currentPhase ?? null; return; }
+    if (prevPhaseRef.current && prevPhaseRef.current !== currentPhase) {
+      setOverlay({ kind: "phase", phase: currentPhase });
+    }
+    prevPhaseRef.current = currentPhase;
+  }, [currentPhase, modState?.state?.active]);
+
+  // Detectar ronda completada -> aviso al que modera
+  const roundComplete = !!(modState?.state?.active && modState.state.interventionsCompleted >= modState.state.interventionsRequired);
+  useEffect(() => {
+    if (roundComplete && !prevRoundCompleteRef.current && canModerate) {
+      setOverlay({ kind: "roundComplete", phase: modState.state.currentPhase });
+    }
+    prevRoundCompleteRef.current = roundComplete;
+  }, [roundComplete]);
 
   async function sendTextMsg(e: React.FormEvent) {
     e.preventDefault();
@@ -120,6 +192,7 @@ export default function DiscussionRoom() {
         setText("");
         await fetchMessages();
         await fetchSummaries();
+        await fetchModState();
       }
     } catch (e) { console.error(e); }
     setSending(false);
@@ -182,6 +255,54 @@ export default function DiscussionRoom() {
     const res = await uploadAudio(discussionId, blob);
     if (!res.ok) setAudioError(res.error ?? "Error al subir audio");
     await fetchMessages();
+    await fetchModState();
+  }
+
+  async function activateModerator() {
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/activate-moderator`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        await fetchModState();
+        setOverlay({ kind: "activated", phase: "apertura" });
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function advancePhase() {
+    setAdvancing(true);
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/next-phase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conclusionTitle: conclusionTitle.trim() || undefined,
+          conclusionContent: conclusionContent.trim() || undefined,
+        }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setConclusionTitle("");
+        setConclusionContent("");
+        setOverlay(null);
+        await fetchModState();
+      }
+    } catch (e) { console.error(e); }
+    setAdvancing(false);
+  }
+
+  async function generatePartialSummary() {
+    setGeneratingSummary(true);
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/partial-summary`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) await fetchSummaries();
+    } catch (e) { console.error(e); }
+    setGeneratingSummary(false);
   }
 
   if (authLoading || loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -190,6 +311,22 @@ export default function DiscussionRoom() {
 
   const pinnedMessages = messages.filter((m) => m.pinned);
   const normalMessages = messages.filter((m) => !m.pinned);
+  const modActive = !!modState?.state?.active;
+  const interventionsCompleted = modState?.state?.interventionsCompleted ?? 0;
+  const interventionsRequired = modState?.state?.interventionsRequired ?? 5;
+  const progressPct = Math.min(100, Math.round((interventionsCompleted / Math.max(1, interventionsRequired)) * 100));
+  const conclusions: any[] = modState?.conclusions ?? [];
+
+  const overlayTitle =
+    overlay?.kind === "activated" ? "Moderador activado"
+    : overlay?.kind === "roundComplete" ? "Ronda de palabras completada"
+    : `Fase: ${phaseName(overlay?.phase)}`;
+  const overlayDesc =
+    overlay?.kind === "activated"
+      ? `La discusion comienza en la fase de ${phaseName("apertura")}. ${PHASE_INFO.apertura.desc}`
+    : overlay?.kind === "roundComplete"
+      ? `Se alcanzo el numero de intervenciones de la fase "${phaseName(overlay?.phase)}". El moderador puede registrar una conclusion y avanzar, o seguir conversando.`
+    : PHASE_INFO[overlay?.phase ?? ""]?.desc ?? "";
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -275,8 +412,8 @@ export default function DiscussionRoom() {
                       <p className="text-xs italic opacity-80 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Transcribiendo...</p>
                     )}
                     {editingId === m.id ? (
-                      <div className="space-y-2">
-                        <Input value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm" autoFocus />
+                      <div className="space-y-2 min-w-[280px]">
+                        <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm bg-background text-foreground" rows={4} autoFocus />
                         <div className="flex gap-2">
                           <Button size="sm" onClick={() => editMsg(m.id)} className="h-7 text-xs">Guardar</Button>
                           <Button size="sm" variant="ghost" onClick={() => setEditingId(null)} className="h-7 text-xs">Cancelar</Button>
@@ -346,6 +483,116 @@ export default function DiscussionRoom() {
           )}
         </aside>
       </div>
+
+      {/* Widget flotante del Moderador IA */}
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
+        {modOpen && (
+          <Card className="w-80 border-2 shadow-2xl">
+            <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center justify-between rounded-t-xl">
+              <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Moderador IA</span>
+              <button onClick={() => setModOpen(false)} className="text-white/80 hover:text-white" title="Cerrar panel"><X className="h-4 w-4" /></button>
+            </div>
+            <CardContent className="pt-3 space-y-3 max-h-[50vh] overflow-y-auto">
+              {!modActive ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    El moderador guia la discusion por fases (apertura, contextualizacion, acuerdos, compromisos...) con rondas de palabras: cuenta las intervenciones y avisa cuando es momento de avanzar.
+                  </p>
+                  {canModerate ? (
+                    <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
+                      <Sparkles className="h-3.5 w-3.5" /> Activar moderador
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">El administrador de la mesa puede activarlo.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Fase actual</p>
+                    <p className="font-display text-lg leading-tight">{phaseName(currentPhase)}</p>
+                    <p className="text-xs text-muted-foreground">{PHASE_INFO[currentPhase ?? ""]?.desc}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs">Ronda de palabras: <strong>{interventionsCompleted} de {interventionsRequired}</strong> intervenciones</p>
+                    <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                      <div className="h-2 di-gradient rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">Ronda #{modState.state.wordRound}</p>
+                  </div>
+                  {canModerate && (
+                    <div className="space-y-2 pt-1">
+                      <Button size="sm" className="w-full" onClick={() => setOverlay({ kind: "roundComplete", phase: currentPhase })}>
+                        Avanzar a: {phaseName(nextPhaseKey(currentPhase))}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
+                        {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
+                      </Button>
+                    </div>
+                  )}
+                  {conclusions.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Conclusiones por fase</p>
+                      {conclusions.map((cn) => (
+                        <div key={cn.id} className="text-xs border rounded-lg p-2 bg-secondary/40">
+                          <p className="font-semibold">{cn.title}</p>
+                          <p className="text-muted-foreground">{cn.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        <Button onClick={() => setModOpen(!modOpen)} className="rounded-full shadow-lg gap-2 di-gradient text-white">
+          <Sparkles className="h-4 w-4" />
+          {modActive ? `Moderador: ${phaseName(currentPhase)}` : "Moderador IA"}
+          {modActive && (
+            <span className="text-[10px] bg-white/25 rounded-full px-2 py-0.5">{interventionsCompleted}/{interventionsRequired}</span>
+          )}
+        </Button>
+      </div>
+
+      {/* Anuncio grande del moderador (estilo videojuego) */}
+      {overlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <Card className="max-w-lg w-full border-2 shadow-2xl">
+            <div className="di-gradient px-6 py-5 text-white rounded-t-xl text-center">
+              <Sparkles className="h-9 w-9 mx-auto mb-2" />
+              <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">Moderador IA</p>
+              <h2 className="font-display text-3xl leading-tight">{overlayTitle}</h2>
+            </div>
+            <CardContent className="pt-5 space-y-4">
+              <p className="text-center text-sm text-muted-foreground leading-relaxed">{overlayDesc}</p>
+              {overlay.kind === "roundComplete" && canModerate ? (
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Titulo de la conclusion (opcional)"
+                    value={conclusionTitle}
+                    onChange={(e) => setConclusionTitle(e.target.value)}
+                  />
+                  <Textarea
+                    placeholder="Conclusion de esta fase (opcional)"
+                    value={conclusionContent}
+                    onChange={(e) => setConclusionContent(e.target.value)}
+                    rows={3}
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" onClick={() => setOverlay(null)}>Seguir conversando</Button>
+                    <Button className="flex-1 di-gradient text-white" disabled={advancing} onClick={advancePhase}>
+                      {advancing ? <Loader2 className="h-4 w-4 animate-spin" /> : `Avanzar a: ${phaseName(nextPhaseKey(overlay.phase))}`}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button className="w-full di-gradient text-white" onClick={() => setOverlay(null)}>Continuar</Button>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
