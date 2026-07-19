@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Users, Briefcase, Loader2, Shield, Clock, CheckCircle, XCircle,
-  Crown, Trash2, UserCheck,
+  Crown, Trash2, UserCheck, Eye,
 } from "lucide-react";
 
 export default function Admin() {
@@ -123,6 +123,7 @@ export default function Admin() {
             <TabsTrigger value="pending">Mesas pendientes ({pendingWs.length})</TabsTrigger>
             <TabsTrigger value="approved">Mesas aprobadas ({approvedWs.length})</TabsTrigger>
             <TabsTrigger value="users">Usuarios ({usersList.length})</TabsTrigger>
+            <TabsTrigger value="explorar">Explorar mesas ({approvedWs.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="pending" className="mt-4">
@@ -189,6 +190,31 @@ export default function Admin() {
                 ))}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="explorar" className="mt-4">
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+              <p className="text-sm text-amber-800 font-medium flex items-center gap-2"><Eye className="h-4 w-4" /> Modo supervision</p>
+              <p className="text-xs text-amber-700">Como administrador general puedes entrar a observar cualquier mesa y sus discusiones. No quedas registrado como miembro y nadie recibe aviso de tu visita.</p>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {approvedWs.length === 0 && <p className="text-sm text-muted-foreground py-4">No hay mesas aprobadas para explorar.</p>}
+              {approvedWs.map((ws: any) => (
+                <Card key={ws.id} className="border-2 hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="font-display text-lg leading-tight">{ws.name}</CardTitle>
+                    {ws.area && <span className="text-xs bg-secondary px-2 py-0.5 rounded-full w-fit">{ws.area}</span>}
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{ws.description || "Sin descripcion"}</p>
+                    <p className="text-xs text-muted-foreground mb-3">{ws.members?.length ?? 0} miembro(s) · Admin: {ws.adminName || "Sin admin"}</p>
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate(`/workspace/${ws.id}`)}>
+                      <Eye className="h-3.5 w-3.5" /> Observar mesa
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </TabsContent>
         </Tabs>
       </main>
