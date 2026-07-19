@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "http";
 import type { Duplex } from "stream";
-import { createRequire } from "module";
+import { createRequire as createRequireForWs } from "module";
 import { setupWSConnection, setPersistence, docs } from "./ywsUtils";
 import * as Y from "yjs";
 import { and, eq } from "drizzle-orm";
@@ -8,9 +8,10 @@ import { getDb } from "../queries/connection";
 import { documents, workspaceMembers } from "@db/schema";
 import { getSessionFromRequest } from "./auth";
 
-// "ws" se carga con createRequire: el empaquetado ESM del servidor no
-// soporta el require interno de "ws"; asi se carga en tiempo de ejecucion.
-const nodeRequire = createRequire(import.meta.url);
+// "ws" se carga en tiempo de ejecucion (el empaquetado ESM no soporta
+// el require interno de "ws"). Se usa un alias porque el banner del
+// build ya importa "createRequire" a nivel global del paquete.
+const nodeRequire = createRequireForWs(import.meta.url);
 const { WebSocketServer } = nodeRequire("ws") as any;
 
 /* ================================================================
