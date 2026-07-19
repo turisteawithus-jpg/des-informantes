@@ -68,6 +68,9 @@ await ensureColumn("discussion_moderation_states", "hands_raised", "text");
 // 2d. Columna conclusion_id en documents: ancla el documento al recuadro (momento) del que nace
 await ensureColumn("documents", "conclusion_id", "bigint unsigned NULL");
 
+// 2e. Columna content en documents: contenido de los documentos editables en linea
+await ensureColumn("documents", "content", "text");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (
