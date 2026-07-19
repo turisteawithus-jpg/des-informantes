@@ -14,9 +14,11 @@ import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
   CheckCircle2, ListOrdered, Hand, ChevronRight, ChevronDown,
-  ChevronUp, Paperclip, Link2, FileText, Milestone,
+  ChevronUp, Paperclip, Link2, FileText, Milestone, Handshake,
+  FilePlus2, FilePenLine,
 } from "lucide-react";
 import { uploadDocument } from "@/lib/upload";
+import { DocEditor } from "@/components/DocEditor";
 
 const PHASE_INFO: Record<string, { name: string; desc: string }> = {
   apertura: { name: "Apertura", desc: "Se presenta el tema central y las reglas del dialogo. Cada participante se ubica frente al tema." },
@@ -34,6 +36,37 @@ const PHASE_INFO: Record<string, { name: string; desc: string }> = {
 
 function phaseName(key: string | undefined) {
   return (key && PHASE_INFO[key]?.name) || "Apertura";
+}
+
+// Separa el cuerpo de la conclusion de sus compromisos estructurados
+// (formato: "- texto | Responsable: X | Fecha: Y")
+function splitCommitments(content: string): {
+  main: string;
+  commitments: { text: string; responsable: string; fecha: string }[];
+} {
+  const idx = (content || "").indexOf("## Compromisos asumidos");
+  if (idx < 0) return { main: content || "", commitments: [] };
+  const main = content.slice(0, idx);
+  const block = content.slice(idx).replace("## Compromisos asumidos", "");
+  const commitments = block
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("-") || l.startsWith("*"))
+    .map((l) => {
+      const clean = l.replace(/^[-*]\s*/, "");
+      const parts = clean.split("|").map((p) => p.trim());
+      let responsable = "Por definir";
+      let fecha = "Sin fecha";
+      for (const p of parts.slice(1)) {
+        const m = p.match(/^(responsable|fecha)\s*:\s*(.+)$/i);
+        if (m) {
+          if (m[1].toLowerCase() === "responsable") responsable = m[2];
+          else fecha = m[2];
+        }
+      }
+      return { text: parts[0] || clean, responsable, fecha };
+    });
+  return { main, commitments };
 }
 
 type Overlay = {
@@ -82,13 +115,20 @@ export default function DiscussionRoom() {
 
   // Linea de tiempo: documentos anclados + notas de temas + plegado por tema
   const [docsList, setDocsList] = useState<any[]>([]);
-  const [topicInfos, setTopicInfos] = useState<Record<number, string>>({});
+  const [topicInfos, setTopicInfos] = useState<Record<number, { desc: string | null; status?: string }>>({});
   const [expandedTopics, setExpandedTopics] = useState<Record<number, boolean>>({});
   const [docFor, setDocFor] = useState<{ conclusionId: number | null; topicTitle: string } | null>(null);
   const [docTitle, setDocTitle] = useState("");
   const [docUrl, setDocUrl] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docSaving, setDocSaving] = useState(false);
+  // Editor en linea + modales de la linea de tiempo
+  const [editorDoc, setEditorDoc] = useState<{ id: number; title: string } | null>(null);
+  const [conclModal, setConclModal] = useState<any | null>(null);
+  const [commitModal, setCommitModal] = useState<any | null>(null);
+  const [newDocOpen, setNewDocOpen] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState("");
+  const [newDocSaving, setNewDocSaving] = useState(false);
 
   // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -280,7 +320,8 @@ export default function DiscussionRoom() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modState?.state?.active, discussionId, topicsList.length]);
 
-  // Notas (block) del recuadro principal de cada tema, generadas por la IA
+  // Notas (block) del recuadro principal de cada tema. La nota solo existe
+  // cuando el tema ya CONCLUYO; en curso o pendiente solo se muestra el nombre.
   useEffect(() => {
     if (topicsList.length === 0) return;
     topicsList.forEach((_t, i) => {
@@ -290,7 +331,7 @@ export default function DiscussionRoom() {
           const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/topic-info?index=${i}`, { credentials: "include" });
           if (res.ok) {
             const data = await res.json();
-            if (data.desc) setTopicInfos((prev) => ({ ...prev, [i]: data.desc }));
+            setTopicInfos((prev) => ({ ...prev, [i]: { desc: data.desc ?? null, status: data.status ?? "listo" } }));
           }
         } catch { /* la nota queda pendiente para la proxima carga */ }
       })();
@@ -517,6 +558,33 @@ export default function DiscussionRoom() {
     setDocSaving(false);
   }
 
+  // Crear un documento en linea desde el chat y abrirlo en el editor
+  async function createOnlineDoc() {
+    if (!newDocTitle.trim() || newDocSaving) return;
+    setNewDocSaving(true);
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/editor-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newDocTitle.trim(),
+          topicTitle: topicsList[topicIdx] ?? "General",
+        }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await fetchDocs();
+        setEditorDoc({ id: data.documentId, title: newDocTitle.trim() });
+        setNewDocOpen(false);
+        setNewDocTitle("");
+      } else {
+        alert(data.error || "No se pudo crear el documento");
+      }
+    } catch (e) { console.error(e); }
+    setNewDocSaving(false);
+  }
+
   async function generatePartialSummary() {
     setGeneratingSummary(true);
     try {
@@ -691,6 +759,15 @@ export default function DiscussionRoom() {
           {isOpen ? (
             <div className="border-t pt-3">
               <form className="flex items-center gap-2" onSubmit={sendTextMsg}>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  title="Crear un documento en linea (editable aqui mismo, se guarda solo)"
+                  onClick={() => { setNewDocOpen(true); setNewDocTitle(""); }}
+                >
+                  <FilePlus2 className="h-4 w-4" />
+                </Button>
                 <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={selectingTopics ? "Propone un tema para la discusion..." : "Escribe un mensaje..."} className="flex-1" />
                 <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
               </form>
@@ -727,9 +804,17 @@ export default function DiscussionRoom() {
                         <p className="text-xs font-semibold leading-tight">{t}</p>
                       </div>
                       <div className="p-2.5 bg-amber-50/70 flex-1">
-                        <p className="text-[11px] leading-snug text-muted-foreground">
-                          {topicInfos[ti] || "La IA esta redactando la nota del tema..."}
-                        </p>
+                        {topicInfos[ti]?.desc ? (
+                          <p className="text-[11px] leading-snug text-muted-foreground">{topicInfos[ti].desc}</p>
+                        ) : (
+                          <p className="text-[10px] text-center text-muted-foreground py-1">
+                            {topicInfos[ti]?.status === "en-curso"
+                              ? "Tema en curso"
+                              : topicInfos[ti]?.status === "pendiente"
+                                ? "Tema pendiente"
+                                : "..."}
+                          </p>
+                        )}
                       </div>
                       <button
                         className="text-[10px] py-1 border-t flex items-center justify-center gap-1 text-muted-foreground hover:text-foreground"
@@ -742,20 +827,32 @@ export default function DiscussionRoom() {
                     </div>
                     {/* Recuadros secundarios: uno por cada momento concluido del tema */}
                     {expanded && topicConcl.map((cn) => {
-                      const splitAt = (cn.content || "").indexOf("## Compromisos asumidos");
-                      const main = splitAt >= 0 ? cn.content.slice(0, splitAt) : cn.content;
-                      const snippet = (main || "").replace(/[#*>`]/g, "").trim().slice(0, 140);
+                      const { main, commitments } = splitCommitments(cn.content || "");
+                      const snippet = main.replace(/[#*>`]/g, "").trim().slice(0, 140);
                       const momentDocs = topicDocs.filter((d) => d.conclusionId === cn.id);
                       return (
                         <Fragment key={cn.id}>
                           <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
-                          <div className="w-48 border-2 rounded-xl bg-amber-50/70 shadow-sm p-2.5 flex flex-col self-stretch">
+                          <div
+                            className="w-48 border-2 rounded-xl bg-amber-50/70 shadow-sm p-2.5 flex flex-col self-stretch cursor-pointer hover:shadow-md hover:border-primary/50 transition-all"
+                            onClick={() => setConclModal(cn)}
+                            title="Toca para abrir el block de notas completo de este momento"
+                          >
                             <p className="text-[9px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
                             <p className="text-[11px] font-semibold leading-tight mt-0.5">{cn.title}</p>
-                            <p className="text-[10px] text-muted-foreground leading-snug mt-1 line-clamp-4">{snippet}</p>
+                            <p className="text-[10px] text-muted-foreground leading-snug mt-1 line-clamp-3">{snippet}</p>
+                            <p className="text-[9px] text-primary/70 mt-0.5">Toca para leer el block completo</p>
+                            {commitments.length > 0 && (
+                              <button
+                                className="mt-1.5 text-[10px] font-semibold text-amber-900 bg-amber-200 border border-amber-400 rounded-full px-2 py-0.5 flex items-center gap-1 animate-pulse hover:bg-amber-300"
+                                onClick={(e) => { e.stopPropagation(); setCommitModal(cn); }}
+                              >
+                                <Handshake className="h-3 w-3" /> Por entregar ({commitments.length})
+                              </button>
+                            )}
                             <button
                               className="mt-auto pt-1.5 text-[10px] text-primary flex items-center gap-1 hover:underline"
-                              onClick={() => { setDocFor({ conclusionId: cn.id, topicTitle: t }); setDocTitle(""); setDocUrl(""); setDocFile(null); }}
+                              onClick={(e) => { e.stopPropagation(); setDocFor({ conclusionId: cn.id, topicTitle: t }); setDocTitle(""); setDocUrl(""); setDocFile(null); }}
                             >
                               <Paperclip className="h-3 w-3" /> Anexar documento
                             </button>
@@ -764,19 +861,32 @@ export default function DiscussionRoom() {
                           {momentDocs.map((d) => (
                             <Fragment key={d.id}>
                               <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
-                              <a
-                                href={d.fileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
-                              >
-                                <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
-                                  {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
-                                  Documento
-                                </p>
-                                <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
-                                {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
-                              </a>
+                              {d.mimeType === "editor/html" ? (
+                                <button
+                                  onClick={() => setEditorDoc({ id: d.id, title: d.title })}
+                                  className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors text-left"
+                                >
+                                  <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                                    <FilePenLine className="h-3 w-3" /> Documento en linea
+                                  </p>
+                                  <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                                  {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                                </button>
+                              ) : (
+                                <a
+                                  href={d.fileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
+                                >
+                                  <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                                    {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                                    Documento
+                                  </p>
+                                  <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                                  {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                                </a>
+                              )}
                             </Fragment>
                           ))}
                         </Fragment>
@@ -786,19 +896,32 @@ export default function DiscussionRoom() {
                     {looseDocs.map((d) => (
                       <Fragment key={d.id}>
                         <div className="flex items-center px-0.5"><ChevronRight className="h-4 w-4 text-primary" /></div>
-                        <a
-                          href={d.fileUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
-                        >
-                          <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
-                            {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
-                            Documento
-                          </p>
-                          <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
-                          {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
-                        </a>
+                        {d.mimeType === "editor/html" ? (
+                          <button
+                            onClick={() => setEditorDoc({ id: d.id, title: d.title })}
+                            className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors text-left"
+                          >
+                            <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                              <FilePenLine className="h-3 w-3" /> Documento en linea
+                            </p>
+                            <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                            {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                          </button>
+                        ) : (
+                          <a
+                            href={d.fileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="w-44 border-2 border-dashed border-primary/50 rounded-xl bg-card shadow-sm p-2.5 flex flex-col self-stretch hover:border-primary transition-colors"
+                          >
+                            <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
+                              {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                              Documento
+                            </p>
+                            <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                            {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
+                          </a>
+                        )}
                       </Fragment>
                     ))}
                     {/* Flecha hacia el siguiente recuadro de tema */}
@@ -1274,6 +1397,93 @@ export default function DiscussionRoom() {
           </Card>
         </div>,
         document.body,
+      )}
+
+      {/* Block de notas detallado de un momento concluido (click en su recuadro) */}
+      {conclModal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4" onClick={() => setConclModal(null)}>
+          <Card className="max-w-lg w-full border-2 shadow-2xl max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="di-gradient px-4 py-3 text-white rounded-t-xl flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-white/80">{phaseName(conclModal.phase)}</p>
+                <p className="font-display text-lg leading-tight">{conclModal.title}</p>
+              </div>
+              <button onClick={() => setConclModal(null)} className="text-white/80 hover:text-white shrink-0"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 overflow-y-auto max-h-[60vh]">
+              <div className="text-sm leading-relaxed">
+                <MarkdownView content={splitCommitments(conclModal.content || "").main} />
+              </div>
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Block de notas de "Por entregar": compromisos con responsable y fecha */}
+      {commitModal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4" onClick={() => setCommitModal(null)}>
+          <Card className="max-w-md w-full border-2 border-amber-400 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-amber-200 px-4 py-3 rounded-t-xl flex items-center justify-between">
+              <p className="font-display text-lg text-amber-900 flex items-center gap-2"><Handshake className="h-5 w-5" /> Por entregar</p>
+              <button onClick={() => setCommitModal(null)} className="text-amber-700 hover:text-amber-900"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 space-y-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {phaseName(commitModal.phase)} · {commitModal.title}
+              </p>
+              {splitCommitments(commitModal.content || "").commitments.map((cm, i) => (
+                <div key={i} className="border rounded-lg p-3 bg-amber-50/70">
+                  <p className="text-sm font-medium leading-snug">{cm.text}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    <span className="text-[10px] bg-secondary rounded-full px-2 py-0.5">Responsable: <strong>{cm.responsable}</strong></span>
+                    <span className="text-[10px] bg-secondary rounded-full px-2 py-0.5">Para: <strong>{cm.fecha}</strong></span>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Modal: crear documento en linea */}
+      {newDocOpen && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
+          <Card className="max-w-md w-full border-2 shadow-2xl">
+            <div className="di-gradient px-4 py-3 text-white rounded-t-xl flex items-center justify-between">
+              <p className="font-display text-lg flex items-center gap-2"><FilePlus2 className="h-5 w-5" /> Documento en linea</p>
+              <button onClick={() => setNewDocOpen(false)} className="text-white/80 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Se crea dentro de la plataforma: lo editan aqui mismo, se guarda solo y queda como recuadro en la linea de tiempo del tema actual{topicsList[topicIdx] ? ` (${topicsList[topicIdx]})` : ""}.
+              </p>
+              <div className="space-y-1.5">
+                <Label>Tema general del documento *</Label>
+                <Input
+                  value={newDocTitle}
+                  onChange={(e) => setNewDocTitle(e.target.value)}
+                  placeholder="Ej: Acta de acuerdos del vecindario"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createOnlineDoc(); } }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" className="flex-1" onClick={() => setNewDocOpen(false)}>Cancelar</Button>
+                <Button className="flex-1 di-gradient text-white" disabled={!newDocTitle.trim() || newDocSaving} onClick={createOnlineDoc}>
+                  {newDocSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Crear y abrir"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Editor de documentos en linea (se abre dentro de la plataforma) */}
+      {editorDoc && (
+        <DocEditor docId={editorDoc.id} title={editorDoc.title} onClose={() => setEditorDoc(null)} />
       )}
     </div>
   );
