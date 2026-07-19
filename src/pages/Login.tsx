@@ -29,8 +29,19 @@ export default function Login() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        // Recarga completa para que toda la app tome la sesion nueva de una vez
-        window.location.href = "/dashboard";
+        // Confirma que la sesion quedo guardada en el navegador antes de salir
+        try {
+          const me = await fetch("/api/rest/me", { credentials: "include" });
+          if (me.ok) {
+            // Recarga completa para que toda la app tome la sesion nueva de una vez
+            window.location.href = "/dashboard";
+            return;
+          }
+          setError("El servidor te reconocio, pero el navegador no guardo la sesion. Revisa que no estes en modo incognito o con las cookies bloqueadas e intenta de nuevo.");
+        } catch {
+          setError("La sesion no pudo confirmarse. Intenta de nuevo.");
+        }
+        setLoading(false);
         return;
       }
       if (res.status === 403) {

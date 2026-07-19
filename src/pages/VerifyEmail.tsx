@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Loader2, KeyRound } from "lucide-react";
 
 export default function VerifyEmail() {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const email = params.get("email") ?? "";
   const [code, setCode] = useState("");
@@ -31,7 +30,8 @@ export default function VerifyEmail() {
       if (!res.ok) {
         setError(data.error || "Error al verificar");
       } else {
-        navigate("/dashboard");
+        // Recarga completa: la sesion ya quedo creada al verificar
+        window.location.href = "/dashboard";
       }
     } catch {
       setError("Error de conexion");

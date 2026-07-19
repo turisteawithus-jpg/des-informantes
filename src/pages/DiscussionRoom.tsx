@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Send, Loader2, Mic, MessageSquareText, Sparkles, ScrollText,
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
-  CheckCircle2, ListOrdered,
+  CheckCircle2, ListOrdered, Hand, Flag,
 } from "lucide-react";
 
 const PHASE_INFO: Record<string, { name: string; desc: string }> = {
@@ -34,7 +34,7 @@ function phaseName(key: string | undefined) {
 }
 
 type Overlay = {
-  kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision";
+  kind: "activated" | "topics" | "topic" | "phase" | "finished" | "round" | "decision" | "waiting";
   phase?: string;
   prevPhase?: string;
 } | null;
@@ -74,6 +74,7 @@ export default function DiscussionRoom() {
   const prevRoundCompleteRef = useRef<boolean>(false);
   const [overlayStep, setOverlayStep] = useState<1 | 2>(1);
   const [deciding, setDeciding] = useState<"round" | "advance" | null>(null);
+  const [raisingHand, setRaisingHand] = useState(false);
 
   // Moderacion de mensajes: admin general (en cualquier chat) o admin de ESTA mesa
   const canModerate = discussion?.memberRole === "admin" || isGeneralAdmin;
@@ -217,18 +218,29 @@ export default function DiscussionRoom() {
     prevWordRoundRef.current = wordRound;
   }, [currentPhase, topicIdx, topicsList.length, modActiveNow, wordRound]);
 
-  // Cuando la ronda se completa, la pregunta "otra ronda o avanzar" aparece
-  // SOLO al moderador (persona). Los demas solo ven que la ronda se completo.
+  // Cuando la ronda se completa: el moderador (persona) ve la decision;
+  // los demas usuarios ven el aviso de espera con la opcion de pedir la palabra.
   const roundCompleteNow =
     modActiveNow &&
     topicsList.length > 0 &&
     (modState?.state?.interventionsCompleted ?? 0) >= (modState?.state?.interventionsRequired ?? 5);
   useEffect(() => {
-    if (roundCompleteNow && !prevRoundCompleteRef.current && canDecide) {
-      setOverlay((cur) => cur ?? { kind: "decision" });
+    if (roundCompleteNow && !prevRoundCompleteRef.current) {
+      if (canDecide) setOverlay((cur) => cur ?? { kind: "decision" });
+      else setOverlay((cur) => cur ?? { kind: "waiting" });
     }
     prevRoundCompleteRef.current = roundCompleteNow;
   }, [roundCompleteNow, canDecide]);
+
+  // Bienvenida del moderador: el moderador IA se activa solo al abrir la
+  // discusion; este anuncio se muestra UNA vez por usuario y por discusion.
+  useEffect(() => {
+    if (!modState?.state?.active) return;
+    const key = `di-mod-welcome-${discussionId}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, "1");
+    setOverlay((cur) => cur ?? { kind: "activated" });
+  }, [modState?.state?.active, discussionId]);
 
   // Cada anuncio nuevo arranca en su primer paso
   useEffect(() => {
@@ -389,6 +401,20 @@ export default function DiscussionRoom() {
     setDeciding(null);
   }
 
+  // Levantar o bajar la mano (pedir la palabra mientras el moderador decide)
+  async function toggleHand() {
+    if (raisingHand) return;
+    setRaisingHand(true);
+    try {
+      await fetch(`/api/rest/workspaces/discussion/${discussionId}/raise-hand`, {
+        method: "POST",
+        credentials: "include",
+      });
+      await fetchModState();
+    } catch (e) { console.error(e); }
+    setRaisingHand(false);
+  }
+
   async function generatePartialSummary() {
     setGeneratingSummary(true);
     try {
@@ -417,6 +443,10 @@ export default function DiscussionRoom() {
   const roundComplete = modActiveNow && interventionsCompleted >= interventionsRequired;
   // Ronda completa con temas ya definidos: el avance queda en manos del moderador (persona)
   const decisionPending = roundComplete && topicsList.length > 0;
+  // Manos levantadas: usuarios que piden la palabra mientras el moderador decide
+  const handsRaised: number[] = modState?.state?.handsRaised ?? [];
+  const handsCount = handsRaised.length;
+  const myHandRaised = !!user && handsRaised.includes(user.userId);
   const conclusions: any[] = modState?.conclusions ?? [];
   const lastConclusion = conclusions.length > 0 ? conclusions[conclusions.length - 1] : null;
   // La relatoria en proceso muestra SOLO las conclusiones del tema actual (se reinicia por tema)
@@ -565,6 +595,56 @@ export default function DiscussionRoom() {
             </div>
           ) : <div className="border-t pt-3 text-center text-sm text-muted-foreground">La discusion esta cerrada. Revisa la relatoria.</div>}
         </div>
+
+        {/* Memoria de la discusion: recuadros por tema; dentro, los apuntes
+            (block de notas) de cada momento concluido por la IA */}
+        {topicsList.length > 0 && conclusions.length > 0 && (
+          <div className="mt-6">
+            <h2 className="font-display text-lg flex items-center gap-2 mb-3">
+              <ScrollText className="h-5 w-5" /> Memoria de la discusion
+            </h2>
+            <div className="space-y-4">
+              {topicsList.map((t, ti) => {
+                const topicConcl = conclusions.filter((cn) => (cn.topicIndex ?? 0) === ti);
+                if (topicConcl.length === 0) return null;
+                return (
+                  <Card key={ti} className="border-2 overflow-hidden">
+                    <div className="px-4 py-2 border-b bg-secondary/40 flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full di-gradient text-white text-xs flex items-center justify-center shrink-0">{ti + 1}</span>
+                      <p className="font-display text-sm leading-tight">{t}</p>
+                    </div>
+                    <CardContent className="pt-3 space-y-3">
+                      {topicConcl.map((cn) => {
+                        const splitAt = (cn.content || "").indexOf("## Compromisos asumidos");
+                        const main = splitAt >= 0 ? cn.content.slice(0, splitAt) : cn.content;
+                        const commitments = splitAt >= 0 ? cn.content.slice(splitAt).replace("## Compromisos asumidos", "") : null;
+                        return (
+                          <div key={cn.id} className="rounded-lg border bg-amber-50/70 p-3 shadow-sm">
+                            <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
+                            <p className="font-semibold text-sm leading-tight mt-0.5">{cn.title}</p>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              <MarkdownView content={main} />
+                            </div>
+                            {commitments && commitments.trim() && (
+                              <div className="mt-2 border-2 border-amber-400 bg-amber-50 rounded-lg p-2.5">
+                                <p className="text-[10px] uppercase tracking-wide text-amber-700 font-bold flex items-center gap-1">
+                                  <Flag className="h-3 w-3" /> Compromisos del momento
+                                </p>
+                                <div className="text-xs mt-1">
+                                  <MarkdownView content={commitments} />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {closing && (
           <Card className="border-2 mt-4">
@@ -737,6 +817,19 @@ export default function DiscussionRoom() {
                                   </div>
                                 </>
                               )}
+                              {/* El moderador (persona) puede forzar el avance aunque la ronda no se complete */}
+                              {canDecide && !decisionPending && topicsList.length > 0 && isOpen && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full mt-2 h-7 text-xs gap-1"
+                                  disabled={deciding !== null}
+                                  onClick={decideAdvance}
+                                >
+                                  {deciding === "advance" && <Loader2 className="h-3 w-3 animate-spin" />}
+                                  Abrir el siguiente momento ahora
+                                </Button>
+                              )}
                             </>
                           )}
                         </div>
@@ -806,6 +899,7 @@ export default function DiscussionRoom() {
                 {overlay.kind === "phase" && (overlayStep === 1 ? "Cierre del momento" : `Fase: ${phaseName(overlay.phase)}`)}
                 {overlay.kind === "round" && "Nueva ronda de palabras"}
                 {overlay.kind === "decision" && "La ronda se completo"}
+                {overlay.kind === "waiting" && "Ronda de palabras completa"}
                 {overlay.kind === "finished" && "Moderacion finalizada"}
               </h2>
             </div>
@@ -864,6 +958,31 @@ export default function DiscussionRoom() {
                         <p className="text-xs text-primary flex items-center gap-1.5 mt-2"><Loader2 className="h-4 w-4 animate-spin" /> La IA esta trabajando...</p>
                       )}
                     </button>
+                  </div>
+                  <p className="text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
+                    <Hand className="h-3.5 w-3.5" />
+                    {handsCount === 0
+                      ? "Nadie ha pedido la palabra aun"
+                      : `${handsCount} participante${handsCount !== 1 ? "s" : ""} piden la palabra`}
+                  </p>
+                </>
+              )}
+              {overlay.kind === "waiting" && (
+                <>
+                  <p className="text-center text-sm text-muted-foreground leading-relaxed">
+                    Esperando a que el moderador active <strong>otra ronda de palabras</strong> o permita <strong>avanzar al siguiente momento</strong>.
+                    <br /><br />Si tienes otra palabra, solicitala levantando la mano.
+                  </p>
+                  <div className="flex justify-center">
+                    <Button
+                      variant={myHandRaised ? "default" : "outline"}
+                      className={`gap-2 ${myHandRaised ? "di-gradient text-white" : ""}`}
+                      disabled={raisingHand}
+                      onClick={toggleHand}
+                    >
+                      {raisingHand ? <Loader2 className="h-4 w-4 animate-spin" /> : <Hand className="h-4 w-4" />}
+                      {myHandRaised ? "Mano levantada (toca para bajarla)" : "Levantar la mano"}
+                    </Button>
                   </div>
                 </>
               )}
