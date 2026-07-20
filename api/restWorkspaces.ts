@@ -414,6 +414,67 @@ restWorkspaces.put("/messages/:id", async (c) => {
 });
 
 /* ================================================================ */
+/*   RUTAS DE UNA PALABRA — deben registrarse ANTES de GET /:id   */
+/*   (Hono evalua en orden; /:id capturaria /friends y            */
+/*   /conversations y devolveria 500 con id=NaN)                  */
+/* ================================================================ */
+
+// GET /friends — amigos aceptados del usuario
+restWorkspaces.get("/friends", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const db = getDb();
+  const rows = await db.select().from(userFriendships)
+    .where(and(
+      or(eq(userFriendships.userId, user.userId), eq(userFriendships.friendId, user.userId)),
+      eq(userFriendships.status, "accepted"),
+    ));
+  const result: any[] = [];
+  for (const f of rows) {
+    const otherId = f.userId === user.userId ? f.friendId : f.userId;
+    const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+    if (other) result.push({ id: other.id, username: other.username, since: f.createdAt });
+  }
+  return c.json(result);
+});
+
+// GET /conversations — conversaciones del usuario, con ultimo mensaje
+// y cantidad de no leidos (para la lista estilo WhatsApp)
+restWorkspaces.get("/conversations", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const db = getDb();
+  const convs = await db.select().from(privateConversations)
+    .where(or(eq(privateConversations.user1Id, user.userId), eq(privateConversations.user2Id, user.userId)));
+  const result: any[] = [];
+  for (const conv of convs) {
+    const otherId = conv.user1Id === user.userId ? conv.user2Id : conv.user1Id;
+    const otherUser = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+    const msgs = await db.select().from(privateMessages)
+      .where(eq(privateMessages.conversationId, conv.id))
+      .orderBy(desc(privateMessages.createdAt))
+      .limit(50);
+    const last = msgs[0] ?? null;
+    const unread = msgs.filter((m) => m.senderId !== user.userId && !m.read).length;
+    result.push({
+      id: conv.id,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+      otherUser: otherUser ? { id: otherUser.id, username: otherUser.username } : null,
+      lastMessage: last ? { content: last.content, senderId: last.senderId, createdAt: last.createdAt } : null,
+      unreadCount: unread,
+    });
+  }
+  // La mas reciente primero
+  result.sort((a, b) => {
+    const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+    const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+    return tb - ta;
+  });
+  return c.json(result);
+});
+
+/* ================================================================ */
 /*   DETALLE / EDICION / ARCHIVADO DE MESAS                         */
 /* ================================================================ */
 
@@ -1403,25 +1464,6 @@ async function areFriends(db: any, a: number, b: number): Promise<boolean> {
   return !!f && f.status === "accepted";
 }
 
-// GET /friends — amigos aceptados del usuario
-restWorkspaces.get("/friends", async (c) => {
-  const user = getUser(c);
-  if (!user) return c.json({ error: "No autorizado" }, 401);
-  const db = getDb();
-  const rows = await db.select().from(userFriendships)
-    .where(and(
-      or(eq(userFriendships.userId, user.userId), eq(userFriendships.friendId, user.userId)),
-      eq(userFriendships.status, "accepted"),
-    ));
-  const result: any[] = [];
-  for (const f of rows) {
-    const otherId = f.userId === user.userId ? f.friendId : f.userId;
-    const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
-    if (other) result.push({ id: other.id, username: other.username, since: f.createdAt });
-  }
-  return c.json(result);
-});
-
 // GET /friends/requests — solicitudes pendientes (recibidas y enviadas)
 restWorkspaces.get("/friends/requests", async (c) => {
   const user = getUser(c);
@@ -1522,42 +1564,6 @@ restWorkspaces.get("/friends/status/:userId", async (c) => {
 /* ================================================================ */
 /*   CHATS PRIVADOS                                                 */
 /* ================================================================ */
-
-// GET /conversations — conversaciones del usuario, con ultimo mensaje
-// y cantidad de no leidos (para la lista estilo WhatsApp)
-restWorkspaces.get("/conversations", async (c) => {
-  const user = getUser(c);
-  if (!user) return c.json({ error: "No autorizado" }, 401);
-  const db = getDb();
-  const convs = await db.select().from(privateConversations)
-    .where(or(eq(privateConversations.user1Id, user.userId), eq(privateConversations.user2Id, user.userId)));
-  const result: any[] = [];
-  for (const conv of convs) {
-    const otherId = conv.user1Id === user.userId ? conv.user2Id : conv.user1Id;
-    const otherUser = await db.query.users.findFirst({ where: eq(users.id, otherId) });
-    const msgs = await db.select().from(privateMessages)
-      .where(eq(privateMessages.conversationId, conv.id))
-      .orderBy(desc(privateMessages.createdAt))
-      .limit(50);
-    const last = msgs[0] ?? null;
-    const unread = msgs.filter((m) => m.senderId !== user.userId && !m.read).length;
-    result.push({
-      id: conv.id,
-      createdAt: conv.createdAt,
-      updatedAt: conv.updatedAt,
-      otherUser: otherUser ? { id: otherUser.id, username: otherUser.username } : null,
-      lastMessage: last ? { content: last.content, senderId: last.senderId, createdAt: last.createdAt } : null,
-      unreadCount: unread,
-    });
-  }
-  // La mas reciente primero
-  result.sort((a, b) => {
-    const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
-    const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
-    return tb - ta;
-  });
-  return c.json(result);
-});
 
 // POST /conversations — obtener o crear conversacion con otro usuario.
 // Para conversaciones NUEVAS se requiere amistad (o ser administrador general).
