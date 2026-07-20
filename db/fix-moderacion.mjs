@@ -74,6 +74,48 @@ await ensureColumn("documents", "content", "text");
 // 2f. Columna yjs_state en documents: estado binario (base64) de la edicion en vivo
 await ensureColumn("documents", "yjs_state", "mediumtext");
 
+// 2g. Columna parent_id en global_chat_messages: subdiscusiones (hilos) del chat general
+await ensureColumn("global_chat_messages", "parent_id", "bigint unsigned NULL");
+
+// 3b. Tabla de reacciones con emoji del chat general
+await conn.query(`
+  CREATE TABLE IF NOT EXISTS global_chat_reactions (
+    id bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    message_id bigint unsigned NOT NULL,
+    user_id bigint unsigned NOT NULL,
+    emoji varchar(16) NOT NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY global_react_unique (message_id, user_id, emoji)
+  )
+`);
+console.log("OK: tabla global_chat_reactions lista");
+
+// 3c. Tabla de amistades entre usuarios (solicitud pendiente o aceptada)
+await conn.query(`
+  CREATE TABLE IF NOT EXISTS user_friendships (
+    id bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id bigint unsigned NOT NULL,
+    friend_id bigint unsigned NOT NULL,
+    status enum('pending','accepted') NOT NULL DEFAULT 'pending',
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY friendship_unique (user_id, friend_id)
+  )
+`);
+console.log("OK: tabla user_friendships lista");
+
+// 3d. Tabla de recordatorios de compromisos ya enviados (evita duplicados)
+await conn.query(`
+  CREATE TABLE IF NOT EXISTS commitment_reminder_logs (
+    id bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    conclusion_id bigint unsigned NOT NULL,
+    commitment_key varchar(255) NOT NULL,
+    sent_on varchar(10) NOT NULL,
+    created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY reminder_unique (conclusion_id, commitment_key, sent_on)
+  )
+`);
+console.log("OK: tabla commitment_reminder_logs lista");
+
 // 3. Tabla de conclusiones por fase
 await conn.query(`
   CREATE TABLE IF NOT EXISTS moderation_conclusions (

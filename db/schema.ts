@@ -39,8 +39,50 @@ export const globalChatMessages = mysqlTable("global_chat_messages", {
   userId: bigint("user_id", { mode: "number", unsigned: true }).notNull(),
   content: text("content").notNull(),
   pinned: boolean("pinned").notNull().default(false),
+  parentId: bigint("parent_id", { mode: "number", unsigned: true }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// Reacciones con emoji del chat global (una por usuario y emoji por mensaje)
+export const globalChatReactions = mysqlTable(
+  "global_chat_reactions",
+  {
+    id: serial("id").primaryKey(),
+    messageId: bigint("message_id", { mode: "number", unsigned: true }).notNull(),
+    userId: bigint("user_id", { mode: "number", unsigned: true }).notNull(),
+    emoji: varchar("emoji", { length: 16 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("global_react_unique").on(t.messageId, t.userId, t.emoji)],
+);
+
+/* ------------------------ AMISTADES ENTRE USUARIOS ------------------------ */
+
+export const userFriendships = mysqlTable(
+  "user_friendships",
+  {
+    id: serial("id").primaryKey(),
+    userId: bigint("user_id", { mode: "number", unsigned: true }).notNull(),
+    friendId: bigint("friend_id", { mode: "number", unsigned: true }).notNull(),
+    status: mysqlEnum("status", ["pending", "accepted"]).notNull().default("pending"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("friendship_unique").on(t.userId, t.friendId)],
+);
+
+/* ----------------- RECORDATORIOS DE COMPROMISOS ENVIADOS ----------------- */
+
+export const commitmentReminderLogs = mysqlTable(
+  "commitment_reminder_logs",
+  {
+    id: serial("id").primaryKey(),
+    conclusionId: bigint("conclusion_id", { mode: "number", unsigned: true }).notNull(),
+    commitmentKey: varchar("commitment_key", { length: 255 }).notNull(),
+    sentOn: varchar("sent_on", { length: 10 }).notNull(), // YYYY-MM-DD
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("reminder_unique").on(t.conclusionId, t.commitmentKey, t.sentOn)],
+);
 
 /* ------------------------ MESAS DE TRABAJO ------------------------ */
 
