@@ -25,6 +25,7 @@ import {
   generatePhaseBridge,
   generateWelcomeBack,
   generateTopicInfo,
+  generateTopicList,
   nextPhaseKeyServer,
 } from "./lib/groqModerator";
 
@@ -1180,7 +1181,57 @@ restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
 
   let topics: string[] = [];
   try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
-  if (topics.length === 0) return c.json({ error: "Aun no hay temas definidos" }, 400);
+
+  // RONDA DE PROPUESTAS: si aun no hay temas, AVANZAR significa definir la
+  // lista de temas con lo que propuso el grupo y arrancar el Tema 1.
+  // La IA solo organiza lo que los participantes escribieron; nunca inventa.
+  if (topics.length === 0) {
+    const proposalRows = await db
+      .select({
+        userId: discussionMessages.userId,
+        type: discussionMessages.type,
+        content: discussionMessages.content,
+      })
+      .from(discussionMessages)
+      .where(eq(discussionMessages.discussionId, discId))
+      .orderBy(asc(discussionMessages.createdAt))
+      .limit(120);
+    const nameMap = new Map<number, string>();
+    for (const uid of [...new Set(proposalRows.map((r) => r.userId))]) {
+      const u = await db.query.users.findFirst({ where: eq(users.id, uid) });
+      if (u) nameMap.set(uid, u.username);
+    }
+    const proposalMsgs = proposalRows
+      .filter((r) => r.content)
+      .map((r) => ({
+        username: nameMap.get(r.userId) || "Participante",
+        type: r.type,
+        content: r.content || "",
+      }));
+    const wsForTopics = await db.query.workspaces.findFirst({ where: eq(workspaces.id, disc.workspaceId) });
+    const aiTopics = await generateTopicList(wsForTopics?.name || "Proyecto", disc.title, proposalMsgs);
+    if (aiTopics === null) {
+      return c.json({ error: "Hubo un error tecnico al organizar los temas. Intenta de nuevo." }, 500);
+    }
+    if (aiTopics.length === 0) {
+      return c.json({ error: "Aun no hay temas propuestos por los participantes. Dale otra ronda al grupo para que propongan." }, 400);
+    }
+    const finalTopics = aiTopics.slice(0, 8);
+    await db
+      .update(discussionModerationStates)
+      .set({
+        topics: JSON.stringify(finalTopics),
+        currentTopicIndex: 0,
+        currentPhase: "apertura",
+        interventionsCompleted: 0,
+        wordRound: state.wordRound + 1,
+        handsRaised: "[]",
+        updatedAt: new Date(),
+      })
+      .where(eq(discussionModerationStates.discussionId, discId));
+    console.log(`[moderador] Discusion ${discId}: ${finalTopics.length} temas definidos por decision del moderador (ronda ${state.wordRound})`);
+    return c.json({ ok: true, topicsDefined: true });
+  }
 
   // Transcripcion reciente para el analisis de la IA
   const rows = await db
