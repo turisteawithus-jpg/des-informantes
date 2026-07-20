@@ -1257,13 +1257,13 @@ export default function DiscussionRoom() {
             <CardContent className="pt-5 space-y-4 max-h-[60vh] overflow-y-auto">
               {overlay.kind === "activated" && (
                 <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                  Iniciamos con la <strong>propuesta de temas</strong>. En esta primera ronda de palabras, cada participante escribe en el chat <strong>los temas que quiere tratar</strong>. La IA <strong>no propone temas</strong>: solo organiza los que ustedes definan.
-                  <br /><br />Cuando la ronda termine, la IA ordenara los temas propuestos y comenzaremos con el primero. Tambien puedes agregar temas en cualquier momento desde la pestana <strong>Temas</strong> de la ventana flotante.
+                  Para empezar, vamos con la <strong>propuesta de temas</strong>: en esta primera ronda, cada quien escribe en el chat <strong>los temas que le gustaria tratar</strong>. La IA <strong>no propone temas</strong>, solo organiza los que ustedes decidan.
+                  <br /><br />Cuando termine la ronda, arrancamos con el primer tema. Si mas adelante quieren agregar otro, pueden hacerlo en cualquier momento desde la pestana <strong>Temas</strong> de la ventana flotante.
                 </p>
               )}
               {overlay.kind === "topics" && (
                 <>
-                  <p className="text-center text-sm text-muted-foreground">La IA organizo los temas propuestos por los participantes:</p>
+                  <p className="text-center text-sm text-muted-foreground">Estos son los temas que propuso el grupo, ya organizados:</p>
                   <ol className="space-y-1.5">
                     {topicsList.map((t, i) => (
                       <li key={i} className="flex items-center gap-2.5 border rounded-lg px-3 py-2 bg-secondary/40">
@@ -1273,20 +1273,20 @@ export default function DiscussionRoom() {
                     ))}
                   </ol>
                   <p className="text-center text-sm leading-relaxed">
-                    Comenzamos con el <strong>Tema 1: {topicsList[0]}</strong>. Si el grupo quiere tratar algo mas, puedes agregar temas en cualquier momento desde la pestana <strong>Temas</strong> de la ventana flotante.
+                    Arrancamos con el <strong>Tema 1: {topicsList[0]}</strong>. Si mas adelante quieren tratar algo mas, agreguenlo desde la pestana <strong>Temas</strong> de la ventana flotante.
                   </p>
                 </>
               )}
               {overlay.kind === "round" && (
                 <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                  El moderador decidio escuchar de nuevo al grupo: <strong>tenemos otra ronda de palabras</strong> sobre este mismo momento.
-                  <br /><br />Cada participante puede intervenir de nuevo antes de avanzar.
+                  El moderador quiere escucharlos una vez mas: <strong>tenemos otra ronda de palabras</strong> sobre este mismo tema.
+                  <br /><br />Cada quien puede volver a intervenir antes de seguir adelante.
                 </p>
               )}
               {overlay.kind === "decision" && (
                 <>
                   <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                    La ronda de palabras se completo. Como moderador de la discusion, defines el rumbo:
+                    Ya completamos esta ronda de palabras. Como moderador, tu decides que sigue:
                   </p>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <button
@@ -1295,7 +1295,7 @@ export default function DiscussionRoom() {
                       className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
                     >
                       <p className="font-display text-lg leading-tight">Otra ronda de palabras</p>
-                      <p className="text-xs text-muted-foreground mt-1">El grupo vuelve a intervenir sobre este mismo momento, sin avanzar.</p>
+                      <p className="text-xs text-muted-foreground mt-1">El grupo vuelve a hablar sobre este mismo tema, sin avanzar todavia.</p>
                       {deciding === "round" && <Loader2 className="h-4 w-4 animate-spin mt-2 text-primary" />}
                     </button>
                     <button
@@ -1304,7 +1304,7 @@ export default function DiscussionRoom() {
                       className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
                     >
                       <p className="font-display text-lg leading-tight">Abrir el siguiente momento</p>
-                      <p className="text-xs text-muted-foreground mt-1">La IA cierra este momento con su analisis y abre el siguiente con su contexto.</p>
+                      <p className="text-xs text-muted-foreground mt-1">La IA resume lo que se logro y abre el siguiente paso con el contexto.</p>
                       {deciding === "advance" && (
                         <p className="text-xs text-primary flex items-center gap-1.5 mt-2"><Loader2 className="h-4 w-4 animate-spin" /> La IA esta trabajando...</p>
                       )}
@@ -1329,8 +1329,8 @@ export default function DiscussionRoom() {
               {overlay.kind === "waiting" && (
                 <>
                   <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                    Esperando a que el moderador active <strong>otra ronda de palabras</strong> o permita <strong>avanzar al siguiente momento</strong>.
-                    <br /><br />Si tienes otra palabra, solicitala levantando la mano.
+                    Estamos esperando a que el moderador decida si hay <strong>otra ronda de palabras</strong> o si <strong>seguimos al siguiente paso</strong>.
+                    <br /><br />Si quieres decir algo mas, levanta la mano.
                   </p>
                   <div className="flex justify-center">
                     <Button
@@ -1362,7 +1362,7 @@ export default function DiscussionRoom() {
                   )}
                   {overlay.kind === "topic" && (
                     <p className="text-center text-sm leading-relaxed">
-                      Abrimos un nuevo tema. La <strong>Relatoria en proceso</strong> se reinicia: ahora se llenara con las conclusiones de este tema.
+                      Empezamos un tema nuevo. La <strong>Relatoria en proceso</strong> arranca de cero y se ira llenando con las conclusiones de este tema.
                     </p>
                   )}
                 </>

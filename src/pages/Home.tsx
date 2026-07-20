@@ -23,7 +23,13 @@ import {
   PinOff,
   Pencil,
   Trash2,
+  Smile,
+  SmilePlus,
+  MessagesSquare,
 } from "lucide-react";
+
+// Emojis disponibles para reaccionar y para el mensaje
+const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "👏"];
 
 const features = [
   { icon: Globe, title: "Ecosistema digital", desc: "Un espacio online donde equipos crean, conversan y sistematizan su trabajo en mesas organizadas." },
@@ -38,13 +44,19 @@ const features = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { user, isAuthenticated, isAdmin } = useAuth();
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
+  const [openThread, setOpenThread] = useState<number | null>(null);
+  const [replies, setReplies] = useState<any[]>([]);
+  const [replyText, setReplyText] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
+  const [reactPickerFor, setReactPickerFor] = useState<number | null>(null);
+  const [emojiInputOpen, setEmojiInputOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function fetchMessages() {
@@ -113,11 +125,74 @@ export default function Home() {
     } catch (e) { console.error(e); }
   }
 
+  /* ---------------- Subdiscusiones y reacciones ---------------- */
+
+  async function fetchReplies(msgId: number) {
+    try {
+      const res = await fetch(`/api/rest/global-chat/${msgId}/replies`);
+      if (res.ok) setReplies(await res.json());
+    } catch { /* reintenta en el siguiente ciclo */ }
+  }
+
+  function toggleThread(msgId: number) {
+    if (openThread === msgId) { setOpenThread(null); return; }
+    setOpenThread(msgId);
+    setReplyText("");
+    fetchReplies(msgId);
+  }
+
+  async function sendReply(parentId: number) {
+    if (!replyText.trim()) return;
+    setSendingReply(true);
+    try {
+      const res = await fetch("/api/rest/global-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: replyText.trim(), parentId }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setReplyText("");
+        fetchReplies(parentId);
+        fetchMessages();
+      }
+    } catch { /* el usuario reintenta */ }
+    setSendingReply(false);
+  }
+
+  async function toggleReaction(msgId: number, emoji: string) {
+    setReactPickerFor(null);
+    try {
+      await fetch(`/api/rest/global-chat/${msgId}/react`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+        credentials: "include",
+      });
+      fetchMessages();
+    } catch { /* el usuario reintenta */ }
+  }
+
+  function reactionGroups(m: any): { emoji: string; count: number; mine: boolean }[] {
+    const byEmoji = new Map<string, { count: number; mine: boolean }>();
+    for (const r of m.reactions ?? []) {
+      const g = byEmoji.get(r.emoji) ?? { count: 0, mine: false };
+      g.count++;
+      if (r.userId === user?.userId) g.mine = true;
+      byEmoji.set(r.emoji, g);
+    }
+    return EMOJIS.filter((e) => byEmoji.has(e)).map((e) => ({ emoji: e, ...byEmoji.get(e)! }));
+  }
+
   useEffect(() => {
     fetchMessages();
-    const interval = setInterval(fetchMessages, 4000);
+    const interval = setInterval(() => {
+      fetchMessages();
+      if (openThread) fetchReplies(openThread);
+    }, 4000);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openThread]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -245,6 +320,81 @@ export default function Home() {
                     <span className="text-[10px] text-muted-foreground">
                       {m.createdAt ? new Date(m.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : ""}
                     </span>
+
+                    {/* Reacciones y subdiscusion */}
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
+                      {reactionGroups(m).map((g) => (
+                        <button
+                          key={g.emoji}
+                          onClick={() => isAuthenticated && toggleReaction(m.id, g.emoji)}
+                          className={`text-xs rounded-full px-1.5 py-0.5 border ${g.mine ? "bg-primary/15 border-primary/50" : "bg-secondary/60 border-transparent"} ${isAuthenticated ? "hover:border-primary/50" : "cursor-default"}`}
+                          title={isAuthenticated ? "Quitar/poner tu reaccion" : undefined}
+                        >
+                          {g.emoji} {g.count}
+                        </button>
+                      ))}
+                      {isAuthenticated && (
+                        <span className="relative">
+                          <button
+                            onClick={() => setReactPickerFor(reactPickerFor === m.id ? null : m.id)}
+                            className="text-muted-foreground hover:text-primary p-0.5"
+                            title="Reaccionar"
+                          >
+                            <SmilePlus className="h-3.5 w-3.5" />
+                          </button>
+                          {reactPickerFor === m.id && (
+                            <div className="absolute bottom-6 left-0 z-20 bg-card border rounded-lg shadow-lg p-1 flex gap-0.5">
+                              {EMOJIS.map((e) => (
+                                <button key={e} onClick={() => toggleReaction(m.id, e)} className="text-base hover:scale-125 transition-transform px-0.5">{e}</button>
+                              ))}
+                            </div>
+                          )}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => toggleThread(m.id)}
+                        className={`flex items-center gap-1 text-[10px] ${openThread === m.id ? "text-primary font-semibold" : "text-muted-foreground hover:text-primary"}`}
+                      >
+                        <MessagesSquare className="h-3.5 w-3.5" />
+                        {m.replyCount > 0 ? `${m.replyCount} respuesta${m.replyCount !== 1 ? "s" : ""}` : isAuthenticated ? "Responder" : "Ver respuestas"}
+                      </button>
+                    </div>
+
+                    {/* Panel de la subdiscusion */}
+                    {openThread === m.id && (
+                      <div className="mt-2 pl-2 border-l-2 border-primary/30 space-y-1.5 min-w-[240px]">
+                        {replies.length === 0 && (
+                          <p className="text-[11px] text-muted-foreground py-1">Aun no hay respuestas. Empieza la subdiscusion.</p>
+                        )}
+                        {replies.map((r: any) => (
+                          <div key={r.id} className="bg-secondary/50 rounded-md px-2.5 py-1.5">
+                            <span className="font-semibold text-[11px] text-primary">{r.username || "Usuario"}</span>
+                            <p className="text-xs text-foreground/90">{r.content}</p>
+                            <span className="text-[9px] text-muted-foreground">
+                              {r.createdAt ? new Date(r.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : ""}
+                            </span>
+                          </div>
+                        ))}
+                        {isAuthenticated ? (
+                          <div className="flex gap-1.5 pt-1">
+                            <Input
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder="Responde aqui..."
+                              className="h-8 text-xs flex-1"
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); sendReply(m.id); } }}
+                            />
+                            <Button size="sm" className="h-8 px-2" disabled={sendingReply || !replyText.trim()} onClick={() => sendReply(m.id)}>
+                              {sendingReply ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-muted-foreground pt-1">
+                            <Button variant="link" className="p-0 h-auto text-[10px]" onClick={() => navigate("/login")}>Inicia sesion</Button> para responder.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -252,6 +402,25 @@ export default function Home() {
             </div>
             {isAuthenticated ? (
               <form className="p-3 border-t flex gap-2" onSubmit={sendMessage}>
+                <div className="relative">
+                  <Button type="button" variant="ghost" size="icon" onClick={() => setEmojiInputOpen(!emojiInputOpen)} title="Agregar emoji">
+                    <Smile className="h-4 w-4" />
+                  </Button>
+                  {emojiInputOpen && (
+                    <div className="absolute bottom-11 left-0 z-20 bg-card border rounded-lg shadow-lg p-2 grid grid-cols-4 gap-1 w-40">
+                      {EMOJIS.map((e) => (
+                        <button
+                          key={e}
+                          type="button"
+                          onClick={() => { setText((t) => t + e); setEmojiInputOpen(false); }}
+                          className="text-xl hover:scale-125 transition-transform"
+                        >
+                          {e}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe algo en el chat general..." className="flex-1" />
                 <Button type="submit" size="icon" disabled={sending || !text.trim()}><Send className="h-4 w-4" /></Button>
               </form>
