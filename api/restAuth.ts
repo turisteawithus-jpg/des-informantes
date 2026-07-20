@@ -205,11 +205,12 @@ restAuth.post("/logout", async (c) => {
    CHAT GLOBAL PÚBLICO
    ================================================================ */
 
-// GET /api/rest/global-chat — listar mensajes (público, incluye pinned)
+// GET /api/rest/global-chat — listar mensajes principales (público).
+// Incluye por mensaje: cantidad de respuestas (subdiscusion) y reacciones.
 restAuth.get("/global-chat", async (c) => {
   const db = getDb();
-  const { globalChatMessages, users } = await import("@db/schema");
-  const { desc, eq } = await import("drizzle-orm");
+  const { globalChatMessages, users, globalChatReactions } = await import("@db/schema");
+  const { desc, eq, isNull, isNotNull } = await import("drizzle-orm");
   const msgs = await db
     .select({
       id: globalChatMessages.id,
@@ -221,12 +222,38 @@ restAuth.get("/global-chat", async (c) => {
     })
     .from(globalChatMessages)
     .innerJoin(users, eq(globalChatMessages.userId, users.id))
+    .where(isNull(globalChatMessages.parentId))
     .orderBy(desc(globalChatMessages.createdAt))
     .limit(100);
-  return c.json(msgs);
+
+  // Conteo de respuestas por mensaje
+  const replyRows = await db
+    .select({ parentId: globalChatMessages.parentId })
+    .from(globalChatMessages)
+    .where(isNotNull(globalChatMessages.parentId));
+  const replyCounts = new Map<number, number>();
+  for (const r of replyRows) {
+    if (r.parentId != null) replyCounts.set(r.parentId, (replyCounts.get(r.parentId) ?? 0) + 1);
+  }
+
+  // Reacciones (todas; el cliente las agrupa y sabe cual es suya por userId)
+  const reactions = await db
+    .select({
+      messageId: globalChatReactions.messageId,
+      userId: globalChatReactions.userId,
+      emoji: globalChatReactions.emoji,
+    })
+    .from(globalChatReactions);
+
+  return c.json(msgs.map((m) => ({
+    ...m,
+    replyCount: replyCounts.get(m.id) ?? 0,
+    reactions: reactions.filter((r) => r.messageId === m.id),
+  })));
 });
 
-// POST /api/rest/global-chat — enviar mensaje (requiere auth)
+// POST /api/rest/global-chat — enviar mensaje (requiere auth).
+// Opcional: parentId para responder dentro de una subdiscusion.
 restAuth.post("/global-chat", async (c) => {
   const user = getSessionFromRequest(c.req.raw);
   if (!user) return c.json({ error: "No autorizado" }, 401);
@@ -235,13 +262,80 @@ restAuth.post("/global-chat", async (c) => {
   if (!content || content.length < 1 || content.length > 2000) {
     return c.json({ error: "Mensaje invalido" }, 400);
   }
+  const parentId = body.parentId != null ? Number(body.parentId) : null;
   const db = getDb();
   const { globalChatMessages } = await import("@db/schema");
+  if (parentId != null) {
+    if (!Number.isFinite(parentId)) return c.json({ error: "Mensaje padre invalido" }, 400);
+    const parent = await db.query.globalChatMessages.findFirst({
+      where: eq(globalChatMessages.id, parentId),
+    });
+    if (!parent || parent.parentId != null) {
+      return c.json({ error: "La subdiscusion no existe" }, 404);
+    }
+  }
   await db.insert(globalChatMessages).values({
     userId: user.userId,
     content,
+    ...(parentId != null ? { parentId } : {}),
   });
   return c.json({ ok: true });
+});
+
+// GET /api/rest/global-chat/:id/replies — respuestas de una subdiscusion
+restAuth.get("/global-chat/:id/replies", async (c) => {
+  const msgId = Number(c.req.param("id"));
+  if (!Number.isFinite(msgId)) return c.json({ error: "Id invalido" }, 400);
+  const db = getDb();
+  const { globalChatMessages, users } = await import("@db/schema");
+  const { asc } = await import("drizzle-orm");
+  const replies = await db
+    .select({
+      id: globalChatMessages.id,
+      content: globalChatMessages.content,
+      createdAt: globalChatMessages.createdAt,
+      userId: globalChatMessages.userId,
+      username: users.username,
+    })
+    .from(globalChatMessages)
+    .innerJoin(users, eq(globalChatMessages.userId, users.id))
+    .where(eq(globalChatMessages.parentId, msgId))
+    .orderBy(asc(globalChatMessages.createdAt))
+    .limit(200);
+  return c.json(replies);
+});
+
+// Emojis permitidos para reaccionar en el chat general
+const ALLOWED_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "👏"];
+
+// POST /api/rest/global-chat/:id/react — agregar/quitar reaccion (toggle)
+restAuth.post("/global-chat/:id/react", async (c) => {
+  const user = getSessionFromRequest(c.req.raw);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const msgId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const emoji = String(body.emoji ?? "");
+  if (!Number.isFinite(msgId) || !ALLOWED_REACTIONS.includes(emoji)) {
+    return c.json({ error: "Reaccion invalida" }, 400);
+  }
+  const db = getDb();
+  const { globalChatReactions } = await import("@db/schema");
+  const { and } = await import("drizzle-orm");
+  const existing = await db.query.globalChatReactions.findFirst({
+    where: and(
+      eq(globalChatReactions.messageId, msgId),
+      eq(globalChatReactions.userId, user.userId),
+      eq(globalChatReactions.emoji, emoji),
+    ),
+  });
+  if (existing) {
+    await db.delete(globalChatReactions).where(eq(globalChatReactions.id, existing.id));
+    return c.json({ ok: true, reacted: false });
+  }
+  try {
+    await db.insert(globalChatReactions).values({ messageId: msgId, userId: user.userId, emoji });
+  } catch { /* si ya existia (llave unica), se considera agregada */ }
+  return c.json({ ok: true, reacted: true });
 });
 
 /* ================================================================

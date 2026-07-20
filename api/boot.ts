@@ -20,6 +20,7 @@ import {
 import { eq, asc } from "drizzle-orm";
 import { generateTopicList } from "./lib/groqModerator";
 import { attachCollabServer } from "./lib/collab";
+import { startSchedulers } from "./lib/reminders";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -189,6 +190,10 @@ async function processCompletedRounds() {
 }
 
 setInterval(processCompletedRounds, 12000);
+
+// Tareas programadas: recordatorios de compromisos (1:50 PM) y
+// limpieza mensual de los chats personales (solo se conserva el ultimo mes)
+startSchedulers();
 
 const server = serve({
   fetch: app.fetch,

@@ -13,9 +13,10 @@ import {
   documents,
   privateConversations,
   privateMessages,
+  userFriendships,
   emailVerificationCodes,
 } from "@db/schema";
-import { and, desc, eq, or, asc, count } from "drizzle-orm";
+import { and, desc, eq, or, asc, count, like, ne } from "drizzle-orm";
 import { getSessionFromRequest } from "./lib/auth";
 import {
   PHASE_ORDER_SERVER,
@@ -1304,10 +1305,175 @@ restWorkspaces.post("/discussion/:id/intervention", async (c) => {
 });
 
 /* ================================================================ */
+/*   BUSQUEDA DE USUARIOS (cualquier usuario autenticado)           */
+/*   Solo devuelve id y nombre de usuario (nunca el correo).        */
+/* ================================================================ */
+restWorkspaces.get("/users/search", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const q = (c.req.query("q") || "").trim();
+  if (q.length < 2) return c.json([]);
+  const db = getDb();
+  const found = await db
+    .select({ id: users.id, username: users.username })
+    .from(users)
+    .where(and(like(users.username, `%${q}%`), ne(users.id, user.userId)))
+    .limit(10);
+  // Incluir el estado de amistad con cada resultado
+  const result: any[] = [];
+  for (const u of found) {
+    const f = await friendshipBetween(db, user.userId, u.id);
+    let status = "none";
+    if (f) {
+      status = f.status === "accepted"
+        ? "friends"
+        : f.userId === user.userId ? "pending_out" : "pending_in";
+    }
+    result.push({ ...u, status, friendshipId: f?.id ?? null });
+  }
+  return c.json(result);
+});
+
+/* ================================================================ */
+/*   AMISTADES ENTRE USUARIOS                                       */
+/* ================================================================ */
+
+async function friendshipBetween(db: any, a: number, b: number) {
+  return db.query.userFriendships.findFirst({
+    where: or(
+      and(eq(userFriendships.userId, a), eq(userFriendships.friendId, b)),
+      and(eq(userFriendships.userId, b), eq(userFriendships.friendId, a)),
+    ),
+  });
+}
+
+async function areFriends(db: any, a: number, b: number): Promise<boolean> {
+  const f = await friendshipBetween(db, a, b);
+  return !!f && f.status === "accepted";
+}
+
+// GET /friends — amigos aceptados del usuario
+restWorkspaces.get("/friends", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const db = getDb();
+  const rows = await db.select().from(userFriendships)
+    .where(and(
+      or(eq(userFriendships.userId, user.userId), eq(userFriendships.friendId, user.userId)),
+      eq(userFriendships.status, "accepted"),
+    ));
+  const result: any[] = [];
+  for (const f of rows) {
+    const otherId = f.userId === user.userId ? f.friendId : f.userId;
+    const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+    if (other) result.push({ id: other.id, username: other.username, since: f.createdAt });
+  }
+  return c.json(result);
+});
+
+// GET /friends/requests — solicitudes pendientes (recibidas y enviadas)
+restWorkspaces.get("/friends/requests", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const db = getDb();
+  const rows = await db.select().from(userFriendships)
+    .where(and(
+      or(eq(userFriendships.userId, user.userId), eq(userFriendships.friendId, user.userId)),
+      eq(userFriendships.status, "pending"),
+    ));
+  const incoming: any[] = [];
+  const outgoing: any[] = [];
+  for (const f of rows) {
+    const otherId = f.userId === user.userId ? f.friendId : f.userId;
+    const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+    if (!other) continue;
+    const item = { id: f.id, user: { id: other.id, username: other.username }, createdAt: f.createdAt };
+    if (f.friendId === user.userId) incoming.push(item); else outgoing.push(item);
+  }
+  return c.json({ incoming, outgoing });
+});
+
+// POST /friends/request — enviar solicitud de amistad
+restWorkspaces.post("/friends/request", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const body = await c.req.json();
+  const otherId = Number(body.userId);
+  if (!Number.isFinite(otherId) || otherId === user.userId) {
+    return c.json({ error: "Usuario invalido" }, 400);
+  }
+  const db = getDb();
+  const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+  if (!other) return c.json({ error: "Usuario no encontrado" }, 404);
+
+  const existing = await friendshipBetween(db, user.userId, otherId);
+  if (existing) {
+    if (existing.status === "accepted") return c.json({ ok: true, status: "friends" });
+    // Si el otro ya me habia enviado solicitud, se acepta automaticamente
+    if (existing.friendId === user.userId) {
+      await db.update(userFriendships).set({ status: "accepted" })
+        .where(eq(userFriendships.id, existing.id));
+      return c.json({ ok: true, status: "friends" });
+    }
+    return c.json({ ok: true, status: "pending" });
+  }
+  await db.insert(userFriendships).values({
+    userId: user.userId,
+    friendId: otherId,
+    status: "pending",
+  });
+  return c.json({ ok: true, status: "pending" });
+});
+
+// POST /friends/:id/accept — aceptar solicitud (solo quien la recibio)
+restWorkspaces.post("/friends/:id/accept", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const fid = Number(c.req.param("id"));
+  const db = getDb();
+  const f = await db.query.userFriendships.findFirst({ where: eq(userFriendships.id, fid) });
+  if (!f || f.friendId !== user.userId) return c.json({ error: "Solicitud no encontrada" }, 404);
+  await db.update(userFriendships).set({ status: "accepted" }).where(eq(userFriendships.id, fid));
+  return c.json({ ok: true });
+});
+
+// POST /friends/:id/decline — rechazar/cancelar solicitud (cualquiera de los dos)
+restWorkspaces.post("/friends/:id/decline", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const fid = Number(c.req.param("id"));
+  const db = getDb();
+  const f = await db.query.userFriendships.findFirst({ where: eq(userFriendships.id, fid) });
+  if (!f || (f.userId !== user.userId && f.friendId !== user.userId)) {
+    return c.json({ error: "Solicitud no encontrada" }, 404);
+  }
+  await db.delete(userFriendships).where(eq(userFriendships.id, fid));
+  return c.json({ ok: true });
+});
+
+// GET /friends/status/:userId — relacion con otro usuario
+restWorkspaces.get("/friends/status/:userId", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const otherId = Number(c.req.param("userId"));
+  if (!Number.isFinite(otherId)) return c.json({ error: "Id invalido" }, 400);
+  if (otherId === user.userId) return c.json({ status: "self" });
+  const db = getDb();
+  const f = await friendshipBetween(db, user.userId, otherId);
+  if (!f) return c.json({ status: "none" });
+  if (f.status === "accepted") return c.json({ status: "friends", friendshipId: f.id });
+  return c.json({
+    status: f.userId === user.userId ? "pending_out" : "pending_in",
+    friendshipId: f.id,
+  });
+});
+
+/* ================================================================ */
 /*   CHATS PRIVADOS                                                 */
 /* ================================================================ */
 
-// GET /conversations — listar conversaciones del usuario
+// GET /conversations — conversaciones del usuario, con ultimo mensaje
+// y cantidad de no leidos (para la lista estilo WhatsApp)
 restWorkspaces.get("/conversations", async (c) => {
   const user = getUser(c);
   if (!user) return c.json({ error: "No autorizado" }, 401);
@@ -1318,20 +1484,40 @@ restWorkspaces.get("/conversations", async (c) => {
   for (const conv of convs) {
     const otherId = conv.user1Id === user.userId ? conv.user2Id : conv.user1Id;
     const otherUser = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+    const msgs = await db.select().from(privateMessages)
+      .where(eq(privateMessages.conversationId, conv.id))
+      .orderBy(desc(privateMessages.createdAt))
+      .limit(50);
+    const last = msgs[0] ?? null;
+    const unread = msgs.filter((m) => m.senderId !== user.userId && !m.read).length;
     result.push({
-      ...conv,
-      otherUser: otherUser ? { id: otherUser.id, username: otherUser.username, email: otherUser.email } : null,
+      id: conv.id,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+      otherUser: otherUser ? { id: otherUser.id, username: otherUser.username } : null,
+      lastMessage: last ? { content: last.content, senderId: last.senderId, createdAt: last.createdAt } : null,
+      unreadCount: unread,
     });
   }
+  // La mas reciente primero
+  result.sort((a, b) => {
+    const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+    const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+    return tb - ta;
+  });
   return c.json(result);
 });
 
-// POST /conversations — obtener o crear conversacion con otro usuario
+// POST /conversations — obtener o crear conversacion con otro usuario.
+// Para conversaciones NUEVAS se requiere amistad (o ser administrador general).
 restWorkspaces.post("/conversations", async (c) => {
   const user = getUser(c);
   if (!user) return c.json({ error: "No autorizado" }, 401);
   const body = await c.req.json();
   const otherUserId = Number(body.userId);
+  if (!Number.isFinite(otherUserId) || otherUserId === user.userId) {
+    return c.json({ error: "Usuario invalido" }, 400);
+  }
   const db = getDb();
   let conv = await db.query.privateConversations.findFirst({
     where: or(
@@ -1340,6 +1526,9 @@ restWorkspaces.post("/conversations", async (c) => {
     ),
   });
   if (!conv) {
+    if (user.role !== "admin" && !(await areFriends(db, user.userId, otherUserId))) {
+      return c.json({ error: "Primero deben ser amigos: enviale una solicitud de amistad" }, 403);
+    }
     const [result] = await db.insert(privateConversations).values({
       user1Id: Math.min(user.userId, otherUserId),
       user2Id: Math.max(user.userId, otherUserId),
@@ -1349,27 +1538,53 @@ restWorkspaces.post("/conversations", async (c) => {
   return c.json({ ok: true, conversationId: conv.id });
 });
 
-// POST /conversations/:id/messages — enviar mensaje privado
+// POST /conversations/:id/messages — enviar mensaje privado (solo participantes)
 restWorkspaces.post("/conversations/:id/messages", async (c) => {
   const user = getUser(c);
   if (!user) return c.json({ error: "No autorizado" }, 401);
   const convId = Number(c.req.param("id"));
   const body = await c.req.json();
+  const content = String(body.content ?? "").trim();
+  if (!content || content.length > 2000) return c.json({ error: "Mensaje invalido" }, 400);
   const db = getDb();
+  const conv = await db.query.privateConversations.findFirst({
+    where: eq(privateConversations.id, convId),
+  });
+  if (!conv || (conv.user1Id !== user.userId && conv.user2Id !== user.userId)) {
+    return c.json({ error: "Conversacion no encontrada" }, 404);
+  }
   const [result] = await db.insert(privateMessages).values({
     conversationId: convId,
     senderId: user.userId,
-    content: body.content,
+    content,
   });
   return c.json({ ok: true, messageId: Number(result.insertId) });
 });
 
-// GET /conversations/:id/messages — listar mensajes de una conversacion
+// GET /conversations/:id/messages — mensajes de una conversacion (solo
+// participantes). Marca como leidos los mensajes que me enviaron.
 restWorkspaces.get("/conversations/:id/messages", async (c) => {
   const user = getUser(c);
   if (!user) return c.json({ error: "No autorizado" }, 401);
   const convId = Number(c.req.param("id"));
   const db = getDb();
+  const conv = await db.query.privateConversations.findFirst({
+    where: eq(privateConversations.id, convId),
+  });
+  if (!conv || (conv.user1Id !== user.userId && conv.user2Id !== user.userId)) {
+    return c.json({ error: "Conversacion no encontrada" }, 404);
+  }
+  const otherId = conv.user1Id === user.userId ? conv.user2Id : conv.user1Id;
+  const otherUser = await db.query.users.findFirst({ where: eq(users.id, otherId) });
+
+  // Marcar como leidos los que me enviaron
+  await db.update(privateMessages).set({ read: true })
+    .where(and(
+      eq(privateMessages.conversationId, convId),
+      ne(privateMessages.senderId, user.userId),
+      eq(privateMessages.read, false),
+    ));
+
   const msgs = await db.select().from(privateMessages)
     .where(eq(privateMessages.conversationId, convId))
     .orderBy(asc(privateMessages.createdAt));
@@ -1378,7 +1593,10 @@ restWorkspaces.get("/conversations/:id/messages", async (c) => {
     const sender = await db.query.users.findFirst({ where: eq(users.id, m.senderId) });
     result.push({ ...m, senderName: sender?.username ?? "Desconocido" });
   }
-  return c.json(result);
+  return c.json({
+    otherUser: otherUser ? { id: otherUser.id, username: otherUser.username } : null,
+    messages: result,
+  });
 });
 
 export default restWorkspaces;
