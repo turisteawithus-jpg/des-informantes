@@ -330,9 +330,10 @@ export default function DiscussionRoom() {
 
   // Cuando la ronda se completa: el moderador (persona) ve la decision;
   // los demas usuarios ven el aviso de espera con la opcion de pedir la palabra.
+  // La ronda se completa igual en la ronda de propuestas (sin temas aun)
+  // que en los momentos: en ambos casos el moderador decide que sigue.
   const roundCompleteNow =
     modActiveNow &&
-    topicsList.length > 0 &&
     (modState?.state?.interventionsCompleted ?? 0) >= (modState?.state?.interventionsRequired ?? 5);
   useEffect(() => {
     if (roundCompleteNow && !prevRoundCompleteRef.current) {
@@ -1247,9 +1248,9 @@ export default function DiscussionRoom() {
                 {overlay.kind === "topics" && "Temas de la discusion"}
                 {overlay.kind === "topic" && `Tema ${topicIdx + 1}: ${topicsList[topicIdx] ?? ""}`}
                 {overlay.kind === "phase" && (overlayStep === 1 ? "Cierre del momento" : `Fase: ${phaseName(overlay.phase)}`)}
-                {overlay.kind === "round" && "Nueva ronda de palabras"}
-                {overlay.kind === "decision" && "La ronda se completo"}
-                {overlay.kind === "waiting" && "Ronda de palabras completa"}
+                {overlay.kind === "round" && (topicsList.length === 0 ? "Nueva ronda de propuestas" : "Nueva ronda de palabras")}
+                {overlay.kind === "decision" && (topicsList.length === 0 ? "Ya estan las propuestas" : "La ronda se completo")}
+                {overlay.kind === "waiting" && (topicsList.length === 0 ? "Propuestas completas" : "Ronda de palabras completa")}
                 {overlay.kind === "welcomeback" && `De vuelta, ${user?.username ?? ""}`}
                 {overlay.kind === "finished" && "Moderacion finalizada"}
               </h2>
@@ -1279,14 +1280,21 @@ export default function DiscussionRoom() {
               )}
               {overlay.kind === "round" && (
                 <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                  El moderador quiere escucharlos una vez mas: <strong>tenemos otra ronda de palabras</strong> sobre este mismo tema.
-                  <br /><br />Cada quien puede volver a intervenir antes de seguir adelante.
+                  {topicsList.length === 0 ? (
+                    <>El moderador quiere escucharlos una vez mas: <strong>tenemos otra ronda de propuestas</strong>.
+                    <br /><br />Cada quien puede seguir proponiendo temas antes de definir la lista.</>
+                  ) : (
+                    <>El moderador quiere escucharlos una vez mas: <strong>tenemos otra ronda de palabras</strong> sobre este mismo tema.
+                    <br /><br />Cada quien puede volver a intervenir antes de seguir adelante.</>
+                  )}
                 </p>
               )}
               {overlay.kind === "decision" && (
                 <>
                   <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                    Ya completamos esta ronda de palabras. Como moderador, tu decides que sigue:
+                    {topicsList.length === 0
+                      ? "El grupo ya propuso sus temas. Como moderador, tu decides que sigue:"
+                      : "Ya completamos esta ronda de palabras. Como moderador, tu decides que sigue:"}
                   </p>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <button
@@ -1294,8 +1302,8 @@ export default function DiscussionRoom() {
                       disabled={deciding !== null}
                       className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
                     >
-                      <p className="font-display text-lg leading-tight">Otra ronda de palabras</p>
-                      <p className="text-xs text-muted-foreground mt-1">El grupo vuelve a hablar sobre este mismo tema, sin avanzar todavia.</p>
+                      <p className="font-display text-lg leading-tight">{topicsList.length === 0 ? "Otra ronda de propuestas" : "Otra ronda de palabras"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{topicsList.length === 0 ? "El grupo puede proponer mas temas antes de definir la lista." : "El grupo vuelve a hablar sobre este mismo tema, sin avanzar todavia."}</p>
                       {deciding === "round" && <Loader2 className="h-4 w-4 animate-spin mt-2 text-primary" />}
                     </button>
                     <button
@@ -1303,8 +1311,8 @@ export default function DiscussionRoom() {
                       disabled={deciding !== null}
                       className="border-2 rounded-xl p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-60"
                     >
-                      <p className="font-display text-lg leading-tight">Abrir el siguiente momento</p>
-                      <p className="text-xs text-muted-foreground mt-1">La IA resume lo que se logro y abre el siguiente paso con el contexto.</p>
+                      <p className="font-display text-lg leading-tight">{topicsList.length === 0 ? "Definir temas y comenzar" : "Abrir el siguiente momento"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{topicsList.length === 0 ? "La IA organiza los temas propuestos y arrancamos con el primero." : "La IA resume lo que se logro y abre el siguiente paso con el contexto."}</p>
                       {deciding === "advance" && (
                         <p className="text-xs text-primary flex items-center gap-1.5 mt-2"><Loader2 className="h-4 w-4 animate-spin" /> La IA esta trabajando...</p>
                       )}
@@ -1329,8 +1337,13 @@ export default function DiscussionRoom() {
               {overlay.kind === "waiting" && (
                 <>
                   <p className="text-center text-sm text-muted-foreground leading-relaxed">
-                    Estamos esperando a que el moderador decida si hay <strong>otra ronda de palabras</strong> o si <strong>seguimos al siguiente paso</strong>.
-                    <br /><br />Si quieres decir algo mas, levanta la mano.
+                    {topicsList.length === 0 ? (
+                      <>Estamos esperando a que el moderador decida si hay <strong>otra ronda de propuestas</strong> o si <strong>definimos los temas y arrancamos</strong>.
+                      <br /><br />Si quieres proponer otro tema, levanta la mano.</>
+                    ) : (
+                      <>Estamos esperando a que el moderador decida si hay <strong>otra ronda de palabras</strong> o si <strong>seguimos al siguiente paso</strong>.
+                      <br /><br />Si quieres decir algo mas, levanta la mano.</>
+                    )}
                   </p>
                   <div className="flex justify-center">
                     <Button
