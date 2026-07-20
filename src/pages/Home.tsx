@@ -11,7 +11,7 @@ import {
   MessageSquareText,
   Sparkles,
   FileText,
-  Map,
+  Map as MapIcon,
   ListChecks,
   Globe,
   Users,
@@ -37,7 +37,7 @@ const features = [
   { icon: MessageSquareText, title: "Texto y audio juntos", desc: "El mismo espacio funciona con mensajes escritos y grabaciones. Todo queda documentado." },
   { icon: Sparkles, title: "Moderacion inteligente", desc: "La IA resume la discusion periodicamente: conclusiones, tareas y ambiente del debate." },
   { icon: FileText, title: "Relatorias automaticas", desc: "Al cerrar una sesion se genera la relatoria oficial con temas, acuerdos y pendientes." },
-  { icon: Map, title: "Mapa de documentos", desc: "Cada documento se conecta por temas. El proceso del proyecto se ve de un vistazo." },
+  { icon: MapIcon, title: "Mapa de documentos", desc: "Cada documento se conecta por temas. El proceso del proyecto se ve de un vistazo." },
   { icon: ListChecks, title: "Tareas con seguimiento", desc: "Las tareas nacen de la conversacion, se asignan con fechas y se vinculan a sus resultados." },
   { icon: Users, title: "Mesas de trabajo", desc: "Crea o unete a mesas aprobadas. Cada mesa tiene su administrador y su estructura propia." },
 ];
