@@ -77,6 +77,11 @@ await ensureColumn("documents", "yjs_state", "mediumtext");
 // 2g. Columna parent_id en global_chat_messages: subdiscusiones (hilos) del chat general
 await ensureColumn("global_chat_messages", "parent_id", "bigint unsigned NULL");
 
+// 2h. Columnas del chat privado que el esquema ya declara pero que podian
+// faltar en la base de datos (sin ellas, los SELECT de conversaciones dan 500)
+await ensureColumn("private_messages", "read", "tinyint(1) NOT NULL DEFAULT 0");
+await ensureColumn("private_conversations", "updated_at", "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+
 // 3b. Tabla de reacciones con emoji del chat general
 await conn.query(`
   CREATE TABLE IF NOT EXISTS global_chat_reactions (
