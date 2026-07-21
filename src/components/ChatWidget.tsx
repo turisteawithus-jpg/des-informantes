@@ -248,7 +248,7 @@ export function ChatWidget() {
 
   if (!isAuthenticated) return null;
 
-  const filteredConvs = search.trim().length >= 2 && tab === "chats"
+  const filteredConvs = search.trim().length >= 1 && tab === "chats"
     ? convs.filter((cv) => cv.otherUser?.username?.toLowerCase().includes(search.trim().toLowerCase()))
     : convs;
 
@@ -356,7 +356,7 @@ export function ChatWidget() {
                       </div>
                     )}
 
-                    {search.trim().length >= 2 ? (
+                    {search.trim().length >= 1 ? (
                       <>
                         {searching && <div className="text-center py-4"><Loader2 className="h-4 w-4 animate-spin mx-auto text-muted-foreground" /></div>}
                         {!searching && results.length === 0 && (
