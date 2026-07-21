@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
+import { DocEditor } from "@/components/DocEditor";
 import {
   Plus, Loader2, MessageSquare, ArrowLeft, Users, CircleDot, CircleCheck,
   CheckCircle, XCircle, DoorOpen, UserCheck, Sparkles, Flag,
@@ -25,13 +26,14 @@ export default function WorkspaceView() {
   const { id } = useParams<{ id: string }>();
   const workspaceId = Number(id);
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, isAdmin } = useAuth();
 
   const [ws, setWs] = useState<any>(null);
   const [discussions, setDiscussions] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
   const [progressMap, setProgressMap] = useState<Record<number, any>>({});
+  const [editorDoc, setEditorDoc] = useState<{ id: number; title: string } | null>(null);
   const [docsByDisc, setDocsByDisc] = useState<Record<number, any[]>>({});
   const [loading, setLoading] = useState(true);
 
@@ -267,7 +269,8 @@ export default function WorkspaceView() {
                                 title={doc.title}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (doc.mimeType === "editor/html" || !doc.fileUrl) navigate(`/discussion/${d.id}`);
+                                  e.preventDefault();
+                                  if (doc.mimeType === "editor/html" || !doc.fileUrl) setEditorDoc({ id: doc.id, title: doc.title });
                                   else window.open(doc.fileUrl, "_blank");
                                 }}
                               >
@@ -350,6 +353,11 @@ export default function WorkspaceView() {
           <Card className="border-dashed"><CardContent className="py-10 text-center text-muted-foreground">Unete a esta mesa para ver las discusiones y participar.</CardContent></Card>
         )}
       </main>
+
+      {/* Documentos en linea: se abren aqui mismo, sin entrar a la discusion */}
+      {editorDoc && (
+        <DocEditor docId={editorDoc.id} title={editorDoc.title} username={user?.username ?? "Participante"} onClose={() => setEditorDoc(null)} />
+      )}
     </div>
   );
 }
