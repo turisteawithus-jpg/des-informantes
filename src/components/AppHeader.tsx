@@ -20,18 +20,18 @@ export function AppHeader() {
             </div>
           </Link>
 
-          <nav className="flex items-center gap-2">
+          <nav className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
             {isAuthenticated ? (
               <>
                 <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/dashboard")}>
-                  <LayoutDashboard className="h-4 w-4 mr-1" /> Mis mesas
+                  <LayoutDashboard className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Mis mesas</span>
                 </Button>
                 <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/conversations")}>
-                  <MessageCircle className="h-4 w-4 mr-1" /> Chats
+                  <MessageCircle className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Chats</span>
                 </Button>
                 {isAdmin && (
                   <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/admin")}>
-                    <Shield className="h-4 w-4 mr-1" /> Admin
+                    <Shield className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Admin</span>
                   </Button>
                 )}
                 <span className="hidden sm:inline text-white/80 text-sm px-2">{user?.username}</span>
@@ -42,7 +42,7 @@ export function AppHeader() {
             ) : (
               <>
                 <Button variant="ghost" className="text-white/90 hover:bg-white/10 hover:text-white" onClick={() => navigate("/login")}>Entrar</Button>
-                <Button className="bg-white text-[#0a2540] hover:bg-gray-100 font-semibold" onClick={() => navigate("/register")}>Crear cuenta</Button>
+                <Button className="bg-white text-[#0a2540] hover:bg-gray-100 font-semibold" onClick={() => navigate("/register")}><span className="hidden sm:inline">Crear cuenta</span><span className="sm:hidden">Crear</span></Button>
               </>
             )}
           </nav>

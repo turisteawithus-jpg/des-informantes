@@ -187,7 +187,7 @@ export function ChatWidget() {
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const q = search.trim();
-    if (q.length < 2) { setResults([]); setSearching(false); return; }
+    if (q.length < 1) { setResults([]); setSearching(false); return; }
     setSearching(true);
     searchTimer.current = setTimeout(async () => {
       try {
@@ -253,7 +253,7 @@ export function ChatWidget() {
     : convs;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 print:hidden">
+    <div className="fixed bottom-4 left-4 z-40 flex flex-col items-start gap-2 print:hidden">
       {open && (
         <div className="w-[330px] max-w-[calc(100vw-2rem)] h-[470px] max-h-[72vh] bg-card border-2 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           {activeChat ? (
