@@ -143,7 +143,7 @@ export default function DiscussionRoom() {
   // Moderador IA (automatico, por temas)
   const [modState, setModState] = useState<any>(null);
   const [modOpen, setModOpen] = useState(false);
-  const [modTab, setModTab] = useState<"temas" | "relatoria" | "resumenes">("temas");
+  const [modTab, setModTab] = useState<"temas" | "resumenes">("temas");
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [addingTopic, setAddingTopic] = useState(false);
@@ -1289,14 +1289,13 @@ export default function DiscussionRoom() {
       {createPortal(
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
         {modOpen && (
-          <Card className="w-96 border-2 shadow-2xl">
+          <Card className="w-[min(384px,calc(100vw-5rem))] border-2 shadow-2xl">
             <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center justify-between rounded-t-xl">
               <span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Relatoria en proceso</span>
               <button onClick={() => setModOpen(false)} className="text-white/80 hover:text-white" title="Cerrar panel"><X className="h-4 w-4" /></button>
             </div>
             <div className="flex border-b text-xs">
               <button onClick={() => setModTab("temas")} className={`flex-1 py-2 font-medium flex items-center justify-center gap-1 ${modTab === "temas" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}><ListOrdered className="h-3 w-3" /> Temas</button>
-              <button onClick={() => setModTab("relatoria")} className={`flex-1 py-2 font-medium ${modTab === "relatoria" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Conclusiones IA</button>
               <button onClick={() => setModTab("resumenes")} className={`flex-1 py-2 font-medium ${modTab === "resumenes" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`}>Resumenes</button>
             </div>
             <CardContent className="pt-3 space-y-3 max-h-[55vh] overflow-y-auto">
@@ -1306,83 +1305,6 @@ export default function DiscussionRoom() {
                     <>
                       <p className="text-xs text-muted-foreground">
                         Los temas de la discusion los proponen los participantes, no la IA. Activa el Moderador IA y escribe tus propuestas en el chat: la IA solo las organiza y guia el trabajo tema por tema.
-                      </p>
-                      <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
-                        <Sparkles className="h-3.5 w-3.5" /> Activar moderador
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      {topicsList.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          Aun no hay temas definidos. Escribe tus propuestas en el chat o agrega un tema aqui abajo. La IA organizara <strong>solo los temas que ustedes propongan</strong>.
-                        </p>
-                      ) : (
-                        <ol className="space-y-1.5">
-                          {topicsList.map((t, i) => {
-                            const done = i < topicIdx || !modActiveNow;
-                            const current = i === topicIdx && modActiveNow;
-                            return (
-                              <li key={i} className={`flex items-center gap-2 border rounded-lg px-2.5 py-1.5 ${current ? "border-primary bg-primary/5" : "bg-secondary/40"}`}>
-                                {done ? (
-                                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                                ) : (
-                                  <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center shrink-0 ${current ? "di-gradient text-white" : "bg-secondary text-muted-foreground"}`}>{i + 1}</span>
-                                )}
-                                <span className={`text-xs leading-tight ${current ? "font-semibold" : ""} ${done ? "text-muted-foreground line-through" : ""}`}>{t}</span>
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      )}
-                      {isOpen && (
-                        addingTopic ? (
-                          <div className="flex gap-1.5">
-                            <Input
-                              value={newTopic}
-                              onChange={(e) => setNewTopic(e.target.value)}
-                              placeholder="Titulo del nuevo tema..."
-                              className="h-8 text-sm"
-                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } }}
-                              autoFocus
-                            />
-                            <Button size="sm" className="h-8 px-2.5" onClick={addTopic} disabled={!newTopic.trim() || savingTopic}>
-                              {savingTopic ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "OK"}
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { setAddingTopic(false); setNewTopic(""); }}>
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <Button size="sm" variant="outline" className="w-full gap-1 text-xs" onClick={() => setAddingTopic(true)}>
-                            <Plus className="h-3.5 w-3.5" /> Agregar tema
-                          </Button>
-                        )
-                      )}
-                    </>
-                  )}
-                </>
-              ) : modTab === "resumenes" ? (
-                <>
-                  {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes parciales que la IA genera de la discusion.</p>}
-                  {summaries.map((s) => (
-                    <div key={s.id} className="border rounded-lg p-2.5 bg-secondary/40">
-                      <p className="text-[10px] text-muted-foreground mb-1">
-                        Resumen tras {s.messageCount} mensajes · {new Date(s.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                      <MarkdownView content={s.content} />
-                    </div>
-                  ))}
-                  <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
-                    {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {!modState ? (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        El Moderador IA guia la discusion automaticamente. Primero organiza los temas que ustedes propongan y luego genera la conclusion de cada fase. Aqui se van guardando las conclusiones del tema en curso.
                       </p>
                       <Button size="sm" className="w-full gap-1 di-gradient text-white" onClick={activateModerator}>
                         <Sparkles className="h-3.5 w-3.5" /> Activar moderador
@@ -1492,25 +1414,69 @@ export default function DiscussionRoom() {
                           <p className="text-xs text-green-800 font-medium">El moderador concluyo todos los temas. La memoria completa esta guardada.</p>
                         </div>
                       )}
-                      {topicsList.length > 0 && (
-                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          Conclusiones del tema actual: {topicsList[topicIdx]}
+                      {topicsList.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Aun no hay temas definidos. Escribe tus propuestas en el chat o agrega un tema aqui abajo. La IA organizara <strong>solo los temas que ustedes propongan</strong>.
                         </p>
+                      ) : (
+                        <ol className="space-y-1.5">
+                          {topicsList.map((t, i) => {
+                            const done = i < topicIdx || !modActiveNow;
+                            const current = i === topicIdx && modActiveNow;
+                            return (
+                              <li key={i} className={`flex items-center gap-2 border rounded-lg px-2.5 py-1.5 ${current ? "border-primary bg-primary/5" : "bg-secondary/40"}`}>
+                                {done ? (
+                                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                                ) : (
+                                  <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center shrink-0 ${current ? "di-gradient text-white" : "bg-secondary text-muted-foreground"}`}>{i + 1}</span>
+                                )}
+                                <span className={`text-xs leading-tight ${current ? "font-semibold" : ""} ${done ? "text-muted-foreground line-through" : ""}`}>{t}</span>
+                              </li>
+                            );
+                          })}
+                        </ol>
                       )}
-                      {topicConclusions.length === 0 && modActiveNow && (
-                        <p className="text-xs text-muted-foreground">Cuando la IA concluya la primera fase de este tema, la conclusion aparecera aqui.</p>
-                      )}
-                      {topicConclusions.map((cn) => (
-                        <div key={cn.id} className="border rounded-lg p-2.5 bg-card">
-                          <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
-                          <p className="font-semibold text-sm leading-tight">{cn.title}</p>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            <MarkdownView content={cn.content} />
+                      {isOpen && (
+                        addingTopic ? (
+                          <div className="flex gap-1.5">
+                            <Input
+                              value={newTopic}
+                              onChange={(e) => setNewTopic(e.target.value)}
+                              placeholder="Titulo del nuevo tema..."
+                              className="h-8 text-sm"
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); } }}
+                              autoFocus
+                            />
+                            <Button size="sm" className="h-8 px-2.5" onClick={addTopic} disabled={!newTopic.trim() || savingTopic}>
+                              {savingTopic ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "OK"}
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { setAddingTopic(false); setNewTopic(""); }}>
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
-                        </div>
-                      ))}
+                        ) : (
+                          <Button size="sm" variant="outline" className="w-full gap-1 text-xs" onClick={() => setAddingTopic(true)}>
+                            <Plus className="h-3.5 w-3.5" /> Agregar tema
+                          </Button>
+                        )
+                      )}
                     </>
                   )}
+                </>
+              ) : (
+                <>
+                  {!summaries.length && <p className="text-xs text-muted-foreground">Aqui aparecen los resumenes parciales que la IA genera de la discusion.</p>}
+                  {summaries.map((s) => (
+                    <div key={s.id} className="border rounded-lg p-2.5 bg-secondary/40">
+                      <p className="text-[10px] text-muted-foreground mb-1">
+                        Resumen tras {s.messageCount} mensajes · {new Date(s.createdAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      <MarkdownView content={s.content} />
+                    </div>
+                  ))}
+                  <Button size="sm" variant="ghost" className="w-full" disabled={generatingSummary} onClick={generatePartialSummary}>
+                    {generatingSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generar resumen ahora"}
+                  </Button>
                 </>
               )}
             </CardContent>
