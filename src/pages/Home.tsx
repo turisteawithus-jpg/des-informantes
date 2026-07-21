@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  Mic,
+  ShieldCheck,
   MessageSquareText,
   Sparkles,
   FileText,
@@ -32,13 +32,13 @@ import {
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "👏"];
 
 const features = [
-  { icon: Globe, title: "Ecosistema digital", desc: "Un espacio online donde equipos crean, conversan y sistematizan su trabajo en mesas organizadas." },
-  { icon: Mic, title: "Discusiones con voz", desc: "Cada audio se transcribe automáticamente con IA. Nadie tiene que tomar notas." },
-  { icon: MessageSquareText, title: "Texto y audio juntos", desc: "El mismo espacio funciona con mensajes escritos y grabaciones. Todo queda documentado." },
-  { icon: Sparkles, title: "Moderacion inteligente", desc: "La IA resume la discusion periodicamente: conclusiones, tareas y ambiente del debate." },
-  { icon: FileText, title: "Relatorias automaticas", desc: "Al cerrar una sesion se genera la relatoria oficial con temas, acuerdos y pendientes." },
+  { icon: Globe, title: "Ecosistema digital", desc: "Un espacio online donde los equipos conversan, documentan y sistematizan su trabajo en mesas organizadas." },
+  { icon: MessagesSquare, title: "Comunicacion directa y acertada", desc: "Mas que un escenario de conversacion, los chats de discusion son un espacio para comunicarse con precision: entre mas contexto, preguntas y respuestas plantees en una sola intervencion, mucho mejor." },
+  { icon: ShieldCheck, title: "Contra la desinformacion", desc: "Este espacio fue creado para aportar a la organizacion en su trabajo contra la desinformacion politica y cultural." },
+  { icon: Sparkles, title: "Moderacion inteligente", desc: "La IA guia cada discusion por temas y momentos, y redacta la conclusion de cada paso con lo que el grupo construyo." },
+  { icon: FileText, title: "Relatorias automaticas", desc: "Al cerrar una discusion, la relatoria oficial de todo el proceso queda lista para descargar en Word." },
   { icon: MapIcon, title: "Mapa de documentos", desc: "Cada documento se conecta por temas. El proceso del proyecto se ve de un vistazo." },
-  { icon: ListChecks, title: "Tareas con seguimiento", desc: "Las tareas nacen de la conversacion, se asignan con fechas y se vinculan a sus resultados." },
+  { icon: ListChecks, title: "Tareas con seguimiento", desc: "Los compromisos nacen de la conversacion, con responsable y fecha, y la plataforma los recuerda." },
   { icon: Users, title: "Mesas de trabajo", desc: "Crea o unete a mesas aprobadas. Cada mesa tiene su administrador y su estructura propia." },
 ];
 
@@ -209,8 +209,8 @@ export default function Home() {
       <section className="di-gradient text-white">
         <div className="max-w-6xl mx-auto px-4 py-16 md:py-20 text-center">
           <h1 className="font-display text-4xl md:text-6xl mb-4 drop-shadow">Mas alla del relato,<br />estan los hechos.</h1>
-          <p className="text-lg md:text-xl max-w-2xl mx-auto opacity-90 mb-4">
-            DES Informantes es un <strong>ecosistema de trabajo digital online</strong> donde los equipos conversan, documentan y sistematizan sus proyectos con el apoyo de la inteligencia artificial.
+          <p className="text-lg md:text-xl max-w-3xl mx-auto opacity-90 mb-4">
+            DES Informantes es un <strong>ecosistema de trabajo digital online</strong>, creado para aportar a la organizacion que trabaja <strong>contra la desinformacion politica y cultural</strong>. Mas que un escenario de conversacion, sus chats de discusion son un <strong>espacio de comunicacion directa y acertada</strong>: entre mas contexto, preguntas y respuestas plantees en una sola intervencion, mucho mejor.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center mb-10">
             {isAuthenticated ? (
@@ -456,11 +456,12 @@ export default function Home() {
       <section className="di-gradient-soft border-y">
         <div className="max-w-4xl mx-auto px-4 py-16">
           <h2 className="font-display text-3xl text-center mb-10">Asi funciona</h2>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
             {[
-              { n: "1", t: "Registrate", d: "Crea tu cuenta con correo y contrasena. Verifica tu correo y entra al ecosistema." },
-              { n: "2", t: "Crea o unete a una mesa", d: "Solicita crear una nueva mesa de trabajo (espera aprobacion) o solicita unirte a una mesa existente." },
-              { n: "3", t: "Conversa y sistematiza", d: "Dentro de cada mesa, abre discusiones por voz o texto. La IA transcribe, resume y genera relatorias." },
+              { n: "1", t: "Registrate", d: "Crea tu cuenta con correo y contrasena, verifica tu correo y entra al ecosistema." },
+              { n: "2", t: "Crea o unete a una mesa", d: "Solicita crear una mesa de trabajo o unete a una existente. Cada mesa reune a su equipo y sus discusiones." },
+              { n: "3", t: "Propongan temas y conversen", d: "En cada discusion el grupo propone sus temas por el chat. La IA los organiza y guia el trabajo momento a momento, con la precision que da una buena intervencion." },
+              { n: "4", t: "Concluyan y descarguen", d: "Cada momento cierra con una conclusion de la IA. Al final, la relatoria oficial del proceso queda lista para descargar en Word." },
             ].map((s) => (
               <div key={s.n} className="text-center">
                 <div className="w-12 h-12 mx-auto rounded-full di-gradient text-white font-display text-2xl flex items-center justify-center mb-3 shadow">{s.n}</div>

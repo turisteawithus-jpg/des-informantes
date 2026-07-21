@@ -15,6 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Plus, Loader2, MessageSquare, ArrowLeft, Users, CircleDot, CircleCheck,
   CheckCircle, XCircle, DoorOpen, UserCheck, Sparkles, Flag,
+  FileText, FilePenLine, ScrollText, Link2,
 } from "lucide-react";
 
 // Verde biche suave: relleno de las barras de progreso del moderador
@@ -31,6 +32,7 @@ export default function WorkspaceView() {
   const [members, setMembers] = useState<any[]>([]);
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
   const [progressMap, setProgressMap] = useState<Record<number, any>>({});
+  const [docsByDisc, setDocsByDisc] = useState<Record<number, any[]>>({});
   const [loading, setLoading] = useState(true);
 
   // Crear discusion
@@ -53,7 +55,7 @@ export default function WorkspaceView() {
 
   async function fetchAll() {
     setLoading(true);
-    await Promise.all([fetchWorkspace(), fetchDiscussions(), fetchMembers(), fetchJoinRequests(), fetchProgress()]);
+    await Promise.all([fetchWorkspace(), fetchDiscussions(), fetchMembers(), fetchJoinRequests(), fetchProgress(), fetchDocsSummary()]);
     setLoading(false);
   }
 
@@ -79,6 +81,22 @@ export default function WorkspaceView() {
         const map: Record<number, any> = {};
         for (const p of list) map[p.discussionId] = p;
         setProgressMap(map);
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  // Documentos creados dentro de las discusiones (relatorias, docs en linea, archivos y enlaces)
+  async function fetchDocsSummary() {
+    try {
+      const res = await fetch(`/api/rest/workspaces/${workspaceId}/documents-summary`, { credentials: "include" });
+      if (res.ok) {
+        const list: any[] = await res.json();
+        const map: Record<number, any[]> = {};
+        for (const d of list) {
+          if (!map[d.discussionId]) map[d.discussionId] = [];
+          map[d.discussionId].push(d);
+        }
+        setDocsByDisc(map);
       }
     } catch (e) { console.error(e); }
   }
@@ -236,6 +254,40 @@ export default function WorkspaceView() {
                       <CardContent>
                         <p className="text-sm text-muted-foreground line-clamp-2">{d.description || "Sin agenda"}</p>
                         <p className="text-xs text-muted-foreground mt-2">{new Date(d.createdAt).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+
+                        {/* Documentos de la discusion: boton con nombre y fecha de subida.
+                            La relatoria oficial se marca con su propio icono. */}
+                        {(docsByDisc[d.id]?.length ?? 0) > 0 && (
+                          <div className="mt-3 pt-3 border-t space-y-1.5">
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Documentos ({docsByDisc[d.id].length})</p>
+                            {docsByDisc[d.id].map((doc: any) => (
+                              <button
+                                key={doc.id}
+                                className="w-full flex items-center gap-2 border rounded-lg px-2.5 py-1.5 text-left hover:border-primary hover:bg-primary/5 transition-colors"
+                                title={doc.title}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (doc.mimeType === "editor/html" || !doc.fileUrl) navigate(`/discussion/${d.id}`);
+                                  else window.open(doc.fileUrl, "_blank");
+                                }}
+                              >
+                                {doc.topic === "Relatoria oficial" ? (
+                                  <ScrollText className="h-4 w-4 shrink-0 text-primary" />
+                                ) : doc.mimeType === "editor/html" ? (
+                                  <FilePenLine className="h-4 w-4 shrink-0 text-primary" />
+                                ) : doc.mimeType === "link/externo" ? (
+                                  <Link2 className="h-4 w-4 shrink-0 text-primary" />
+                                ) : (
+                                  <FileText className="h-4 w-4 shrink-0 text-primary" />
+                                )}
+                                <span className="text-xs font-medium truncate flex-1">{doc.title}</span>
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {new Date(doc.createdAt).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" })}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
 
                         {/* Barra de progreso del Moderador IA */}
                         {p?.started && (
