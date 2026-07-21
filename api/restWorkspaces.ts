@@ -567,6 +567,32 @@ restWorkspaces.get("/:id/discussions", async (c) => {
   return c.json(list);
 });
 
+// GET /:id/documents-summary — documentos creados dentro de las discusiones de la mesa
+// (relatorias oficiales, documentos en linea, archivos y enlaces), para mostrarlos
+// como botones con nombre y fecha en la tarjeta de cada discusion
+restWorkspaces.get("/:id/documents-summary", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const wsId = Number(c.req.param("id"));
+  const db = getDb();
+  const rows = await db.query.documents.findMany({
+    where: eq(documents.workspaceId, wsId),
+    orderBy: [desc(documents.createdAt)],
+  });
+  const list = rows
+    .filter((d) => d.discussionId)
+    .map((d) => ({
+      id: d.id,
+      discussionId: d.discussionId,
+      title: d.title,
+      topic: d.topic,
+      fileUrl: d.fileUrl,
+      mimeType: d.mimeType,
+      createdAt: d.createdAt,
+    }));
+  return c.json(list);
+});
+
 // GET /:id/discussions-progress — progreso del moderador IA por discusion
 // (alimenta las barras de carga de las tarjetas de discusion en la mesa)
 restWorkspaces.get("/:id/discussions-progress", async (c) => {
