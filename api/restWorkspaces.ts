@@ -16,8 +16,11 @@ import {
   userFriendships,
   emailVerificationCodes,
 } from "@db/schema";
-import { and, desc, eq, or, asc, count, like, ne } from "drizzle-orm";
+import { and, desc, eq, or, asc, count, like, ne, gt } from "drizzle-orm";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
+import path from "node:path";
 import { getSessionFromRequest } from "./lib/auth";
+import { buildRelatoriaDocx } from "./lib/relatoriaDocx";
 import {
   PHASE_ORDER_SERVER,
   PHASE_INFO_SERVER,
@@ -757,7 +760,8 @@ restWorkspaces.post("/discussion/:id/close", async (c) => {
     msgs,
     partials.map((p) => p.content),
   );
-  await db.update(discussions).set({ status: "closed", closedAt: new Date() }).where(eq(discussions.id, discId));
+  const closedAt = new Date();
+  await db.update(discussions).set({ status: "closed", closedAt }).where(eq(discussions.id, discId));
   if (relatoria) {
     await db.insert(summaries).values({
       discussionId: discId,
@@ -767,7 +771,58 @@ restWorkspaces.post("/discussion/:id/close", async (c) => {
       messageCount: rows.length,
     });
   }
-  return c.json({ ok: true, hasRelatoria: !!relatoria });
+
+  // La relatoria queda anexada como documento .docx en la linea de tiempo de
+  // la discusion: sistematizacion completa de todo el proceso de la mesa.
+  // Si algo falla aqui, el cierre igual queda hecho (la relatoria en texto ya se guardo).
+  let relatoriaDocId: number | null = null;
+  try {
+    const modState = await db.query.discussionModerationStates.findFirst({
+      where: eq(discussionModerationStates.discussionId, discId),
+    });
+    let topicTitles: string[] = [];
+    try { topicTitles = modState?.topics ? JSON.parse(modState.topics) : []; } catch { topicTitles = []; }
+    const conclRows = await db.query.moderationConclusions.findMany({
+      where: eq(moderationConclusions.discussionId, discId),
+      orderBy: [asc(moderationConclusions.createdAt)],
+    });
+    const docxBuffer = await buildRelatoriaDocx({
+      workspaceName: ws?.name || "Proyecto",
+      discussionTitle: disc.title,
+      discussionDesc: disc.description,
+      participants: [...nameMap.values()],
+      closedAt,
+      relatoriaText: relatoria,
+      topics: topicTitles,
+      conclusions: conclRows.map((cn) => ({
+        phaseName: PHASE_INFO_SERVER[cn.phase]?.name ?? cn.phase,
+        topicIndex: cn.topicIndex ?? 0,
+        title: cn.title,
+        content: cn.content,
+      })),
+    });
+    const uploadsDir = path.resolve(process.cwd(), "uploads");
+    await mkdir(uploadsDir, { recursive: true });
+    const safeTitle = disc.title.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "discusion";
+    const fileName = `${Date.now()}-relatoria-${safeTitle}.docx`;
+    await writeFile(path.join(uploadsDir, fileName), docxBuffer);
+    const [ins] = await db.insert(documents).values({
+      workspaceId: disc.workspaceId,
+      discussionId: discId,
+      uploadedBy: user.userId,
+      title: `Relatoria oficial - ${disc.title}`.slice(0, 255),
+      topic: "Relatoria oficial",
+      fileName,
+      fileUrl: `/api/files/${fileName}`,
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      sizeBytes: docxBuffer.length,
+    });
+    relatoriaDocId = Number(ins.insertId);
+    console.log(`[relatoria] Discusion ${discId}: relatoria .docx anexada como documento ${relatoriaDocId}`);
+  } catch (e: any) {
+    console.error(`[relatoria] Discusion ${discId}: no se pudo generar el .docx (${e.message})`);
+  }
+  return c.json({ ok: true, hasRelatoria: !!relatoria, relatoriaDocId });
 });
 
 // GET /discussion/:id/summaries — resumenes IA parciales
@@ -1114,6 +1169,187 @@ restWorkspaces.post("/discussion/:id/topics", async (c) => {
   return c.json({ ok: true, topics });
 });
 
+// PUT /discussion/:id/topics/:index — el admin corrige el TEXTO de un tema
+// (el cambio se ve en los recuadros del flujo y en la lista de la relatoria en proceso)
+restWorkspaces.put("/discussion/:id/topics/:index", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const index = Number(c.req.param("index"));
+  const body = await c.req.json();
+  const title = body.title?.trim();
+  if (!title || title.length < 3) return c.json({ error: "Titulo muy corto" }, 400);
+  const db = getDb();
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, disc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state) return c.json({ error: "Moderador no activado" }, 400);
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  if (index < 0 || index >= topics.length) return c.json({ error: "Tema no encontrado" }, 404);
+  const oldTitle = topics[index];
+  topics[index] = title.slice(0, 150);
+  await db.update(discussionModerationStates)
+    .set({ topics: JSON.stringify(topics), updatedAt: new Date() })
+    .where(eq(discussionModerationStates.discussionId, discId));
+  // Los documentos etiquetados con el nombre viejo siguen al nombre nuevo
+  await db.update(documents)
+    .set({ topic: topics[index] })
+    .where(and(eq(documents.discussionId, discId), eq(documents.topic, oldTitle)));
+  console.log(`[moderador] Discusion ${discId}: tema ${index + 1} renombrado a "${topics[index]}"`);
+  return c.json({ ok: true, topics });
+});
+
+// DELETE /discussion/:id/topics/:index — el admin elimina un tema del flujo
+// (sus recuadros de momento se retiran y los documentos anclados quedan sueltos)
+restWorkspaces.delete("/discussion/:id/topics/:index", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const discId = Number(c.req.param("id"));
+  const index = Number(c.req.param("index"));
+  const db = getDb();
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, discId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, disc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  const state = await db.query.discussionModerationStates.findFirst({
+    where: eq(discussionModerationStates.discussionId, discId),
+  });
+  if (!state) return c.json({ error: "Moderador no activado" }, 400);
+  let topics: string[] = [];
+  try { topics = state.topics ? JSON.parse(state.topics) : []; } catch { topics = []; }
+  if (index < 0 || index >= topics.length) return c.json({ error: "Tema no encontrado" }, 404);
+  const removed = topics.splice(index, 1)[0];
+  // Retirar los recuadros de momento del tema y reindexar los de los temas siguientes
+  const concls = await db.query.moderationConclusions.findMany({
+    where: eq(moderationConclusions.discussionId, discId),
+  });
+  for (const cn of concls) {
+    const ti = cn.topicIndex ?? 0;
+    if (ti === index) {
+      await db.update(documents).set({ conclusionId: null }).where(eq(documents.conclusionId, cn.id));
+      await db.delete(moderationConclusions).where(eq(moderationConclusions.id, cn.id));
+    } else if (ti > index) {
+      await db.update(moderationConclusions).set({ topicIndex: ti - 1 }).where(eq(moderationConclusions.id, cn.id));
+    }
+  }
+  // Documentos etiquetados con el nombre del tema eliminado quedan sin tema
+  await db.update(documents).set({ topic: null })
+    .where(and(eq(documents.discussionId, discId), eq(documents.topic, removed)));
+  let currentTopicIndex = state.currentTopicIndex;
+  let currentPhase = state.currentPhase;
+  let interventionsCompleted = state.interventionsCompleted;
+  if (index < currentTopicIndex) {
+    currentTopicIndex = currentTopicIndex - 1;
+  } else if (index === currentTopicIndex && currentTopicIndex >= topics.length) {
+    currentTopicIndex = Math.max(0, topics.length - 1);
+  }
+  if (index === state.currentTopicIndex) {
+    currentPhase = "apertura";
+    interventionsCompleted = 0;
+  }
+  await db.update(discussionModerationStates)
+    .set({ topics: JSON.stringify(topics), currentTopicIndex, currentPhase, interventionsCompleted, updatedAt: new Date() })
+    .where(eq(discussionModerationStates.discussionId, discId));
+  console.log(`[moderador] Discusion ${discId}: tema "${removed}" eliminado por el admin`);
+  return c.json({ ok: true, topics });
+});
+
+// PUT /conclusions/:id — el admin edita el texto de un recuadro de momento
+restWorkspaces.put("/conclusions/:id", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const conclId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const db = getDb();
+  const cn = await db.query.moderationConclusions.findFirst({ where: eq(moderationConclusions.id, conclId) });
+  if (!cn) return c.json({ error: "Recuadro no encontrado" }, 404);
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, cn.discussionId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, disc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  const title = body.title !== undefined ? String(body.title).trim().slice(0, 200) : cn.title;
+  const content = body.content !== undefined ? String(body.content).trim().slice(0, 20000) : cn.content;
+  if (!title || !content) return c.json({ error: "El titulo y el contenido no pueden quedar vacios" }, 400);
+  await db.update(moderationConclusions).set({ title, content }).where(eq(moderationConclusions.id, conclId));
+  return c.json({ ok: true });
+});
+
+// DELETE /conclusions/:id — el admin elimina un recuadro de momento
+restWorkspaces.delete("/conclusions/:id", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const conclId = Number(c.req.param("id"));
+  const db = getDb();
+  const cn = await db.query.moderationConclusions.findFirst({ where: eq(moderationConclusions.id, conclId) });
+  if (!cn) return c.json({ error: "Recuadro no encontrado" }, 404);
+  const disc = await db.query.discussions.findFirst({ where: eq(discussions.id, cn.discussionId) });
+  if (!disc) return c.json({ error: "Discusion no encontrada" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, disc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  await db.update(documents).set({ conclusionId: null }).where(eq(documents.conclusionId, conclId));
+  await db.delete(moderationConclusions).where(eq(moderationConclusions.id, conclId));
+  return c.json({ ok: true });
+});
+
+// PUT /documents/:docId — el admin edita el titulo (y el enlace si es URL) de un recuadro de documento
+restWorkspaces.put("/documents/:docId", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const docId = Number(c.req.param("docId"));
+  const body = await c.req.json();
+  const db = getDb();
+  const doc = await db.query.documents.findFirst({ where: eq(documents.id, docId) });
+  if (!doc) return c.json({ error: "Documento no encontrado" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, doc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  const updates: any = {};
+  if (body.title !== undefined) {
+    const t = String(body.title).trim();
+    if (!t) return c.json({ error: "El titulo no puede quedar vacio" }, 400);
+    updates.title = t.slice(0, 255);
+  }
+  if (body.url !== undefined && doc.mimeType === "link/externo") {
+    const u = String(body.url).trim();
+    if (!/^https?:\/\//i.test(u)) return c.json({ error: "El enlace debe iniciar con http" }, 400);
+    updates.fileUrl = u.slice(0, 500);
+  }
+  if (Object.keys(updates).length === 0) return c.json({ error: "Nada que actualizar" }, 400);
+  await db.update(documents).set(updates).where(eq(documents.id, docId));
+  return c.json({ ok: true });
+});
+
+// DELETE /documents/:docId — el admin elimina un recuadro de documento
+restWorkspaces.delete("/documents/:docId", async (c) => {
+  const user = getUser(c);
+  if (!user) return c.json({ error: "No autorizado" }, 401);
+  const docId = Number(c.req.param("docId"));
+  const db = getDb();
+  const doc = await db.query.documents.findFirst({ where: eq(documents.id, docId) });
+  if (!doc) return c.json({ error: "Documento no encontrado" }, 404);
+  if (!(await isWorkspaceAdmin(db, user, doc.workspaceId))) {
+    return c.json({ error: "Solo el administrador de la mesa o el administrador general" }, 403);
+  }
+  await db.delete(documents).where(eq(documents.id, docId));
+  // Si era un archivo subido a la plataforma, se retira del disco (mejor esfuerzo)
+  if (doc.fileUrl.startsWith("/api/files/")) {
+    try {
+      const name = path.basename(doc.fileUrl);
+      await unlink(path.resolve(process.cwd(), "uploads", name));
+    } catch { /* el archivo ya no existe o no se pudo borrar */ }
+  }
+  return c.json({ ok: true });
+});
+
 // POST /discussion/:id/activate-moderator — activar el moderador IA
 restWorkspaces.post("/discussion/:id/activate-moderator", async (c) => {
   const user = getUser(c);
@@ -1187,6 +1423,16 @@ restWorkspaces.post("/discussion/:id/next-phase", async (c) => {
   return c.json({ ok: true, nextPhase: phases[nextIdx], isLast: nextIdx === phases.length - 1 });
 });
 
+// Quien puede editar o eliminar recuadros (temas, momentos, documentos):
+// SOLO el administrador de la mesa o el administrador general
+async function isWorkspaceAdmin(db: any, user: any, workspaceId: number): Promise<boolean> {
+  if (user.role === "admin") return true;
+  const member = await db.query.workspaceMembers.findFirst({
+    where: and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, user.userId)),
+  });
+  return member?.role === "admin";
+}
+
 // Quien puede decidir el rumbo de la moderacion: quien activo el moderador,
 // un admin de la mesa o el admin general
 async function canDecideModeration(db: any, user: any, state: any, workspaceId: number): Promise<boolean> {
@@ -1256,7 +1502,7 @@ restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
       .from(discussionMessages)
       .where(eq(discussionMessages.discussionId, discId))
       .orderBy(asc(discussionMessages.createdAt))
-      .limit(120);
+      .limit(400);
     const nameMap = new Map<number, string>();
     for (const uid of [...new Set(proposalRows.map((r) => r.userId))]) {
       const u = await db.query.users.findFirst({ where: eq(users.id, uid) });
@@ -1294,7 +1540,13 @@ restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
     return c.json({ ok: true, topicsDefined: true });
   }
 
-  // Transcripcion reciente para el analisis de la IA
+  // Transcripcion del MOMENTO que se cierra: la IA lee todas las intervenciones
+  // escritas desde que cerro el momento anterior (o desde el inicio si es el primero)
+  const lastConcl = await db.query.moderationConclusions.findFirst({
+    where: eq(moderationConclusions.discussionId, discId),
+    orderBy: [desc(moderationConclusions.createdAt)],
+  });
+  const momentSince = lastConcl?.createdAt ?? null;
   const rows = await db
     .select({
       userId: discussionMessages.userId,
@@ -1302,9 +1554,13 @@ restWorkspaces.post("/discussion/:id/advance-phase", async (c) => {
       content: discussionMessages.content,
     })
     .from(discussionMessages)
-    .where(eq(discussionMessages.discussionId, discId))
+    .where(
+      momentSince
+        ? and(eq(discussionMessages.discussionId, discId), gt(discussionMessages.createdAt, momentSince))
+        : eq(discussionMessages.discussionId, discId),
+    )
     .orderBy(asc(discussionMessages.createdAt))
-    .limit(120);
+    .limit(400);
   const nameMap = new Map<number, string>();
   for (const uid of [...new Set(rows.map((r) => r.userId))]) {
     const u = await db.query.users.findFirst({ where: eq(users.id, uid) });
