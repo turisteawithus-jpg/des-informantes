@@ -44,22 +44,27 @@ export async function generateTopicList(
   messages: ModeratorMessage[],
 ): Promise<string[] | null> {
   if (!env.groqApiKey) return null;
-  const recent = messages.slice(-60);
-  const transcript = recent
+  // La IA lee TODAS las intervenciones de la ronda de propuestas
+  const transcript = messages
     .map((m) => `${m.username}${m.type === "audio" ? " (audio)" : ""}: ${m.content}`)
     .join("\n");
   const prompt = `Eres el Moderador IA de DES Informantes. La discusion "${discussionTitle}" (mesa "${workspaceName}") esta en su primera ronda de palabras, en la que los PARTICIPANTES proponen los TEMAS que quieren tratar.
 
-Transcripcion:
+Transcripcion completa de la ronda:
 ${transcript}
 
-Tu UNICA tarea: extraer los temas que los participantes propusieron explicitamente en sus mensajes.
+Tu UNICA tarea: extraer los temas que los participantes propusieron en sus mensajes.
+
+MUY IMPORTANTE — lee con criterio:
+- NO todos los mensajes contienen una propuesta de tema: hay saludos, acuerdos parciales, preguntas, comentarios y conversacion general. Ignora todo eso.
+- Un mensaje puede proponer UN tema, VARIOS temas o NINGUNO. Revisa mensaje por mensaje.
+- El nombre de cada tema debe ser ACERTADO y COMPLETO: que cualquiera entienda de que se hablara, sin perder la fidelidad a lo propuesto.
 
 REGLAS ESTRICTAS:
 - NO inventes temas. NO agregues nada que nadie haya mencionado.
 - NO deduzcas temas a partir del titulo de la discusion.
 - NO propongas temas por tu cuenta: tu solo organizas lo que los participantes pidieron.
-- Redacta cada tema como un titulo corto y claro (maximo 8 palabras), fiel a lo propuesto.
+- Redacta cada tema como un titulo claro y completo (maximo 12 palabras), fiel a lo propuesto.
 - Si varios mensajes proponen lo mismo, unificalos en un solo tema.
 - Maximo 8 temas, ordenados de forma logica para el desarrollo de la discusion.
 
@@ -262,8 +267,8 @@ export async function generateModeratorConclusion(
 ): Promise<{ title: string; content: string } | null> {
   if (!env.groqApiKey) return null;
   const phase = PHASE_INFO_SERVER[phaseKey] ?? { name: phaseKey, objective: phaseKey };
-  const recent = messages.slice(-80);
-  const transcript = recent
+  // La IA lee TODAS las intervenciones del momento (llegan filtradas por la plataforma)
+  const transcript = messages.slice(-250)
     .map((m) => `${m.username}${m.type === "audio" ? " (audio)" : ""}: ${m.content}`)
     .join("\n");
   const prompt = `Eres el Moderador IA de DES Informantes. NO participas en el debate ni expresas opiniones propias: tu funcion es ordenar la conversacion, sintetizar las ideas y generar conclusiones objetivas.
