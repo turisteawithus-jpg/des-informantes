@@ -1680,12 +1680,12 @@ restWorkspaces.get("/users/search", async (c) => {
   const user = getUser(c);
   if (!user) return c.json({ error: "No autorizado" }, 401);
   const q = (c.req.query("q") || "").trim();
-  if (q.length < 2) return c.json([]);
+  if (q.length < 1) return c.json([]);
   const db = getDb();
   const found = await db
     .select({ id: users.id, username: users.username })
     .from(users)
-    .where(and(like(users.username, `%${q}%`), ne(users.id, user.userId)))
+    .where(and(like(users.username, `${q}%`), ne(users.id, user.userId)))
     .limit(10);
   // Incluir el estado de amistad con cada resultado
   const result: any[] = [];
