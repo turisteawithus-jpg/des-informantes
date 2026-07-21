@@ -15,7 +15,7 @@ import {
   ArrowLeft, Lock, Volume2, Pin, PinOff, Trash2, Pencil, X, Plus,
   CheckCircle2, ListOrdered, Hand, ChevronRight, ChevronDown,
   ChevronUp, Paperclip, Link2, FileText, Milestone, Handshake,
-  FilePlus2, FilePenLine,
+  FilePlus2, FilePenLine, Check, Download,
 } from "lucide-react";
 import { uploadDocument } from "@/lib/upload";
 import { DocEditor } from "@/components/DocEditor";
@@ -171,6 +171,18 @@ export default function DiscussionRoom() {
   // Editor en linea + modales de la linea de tiempo
   const [editorDoc, setEditorDoc] = useState<{ id: number; title: string } | null>(null);
   const [conclModal, setConclModal] = useState<any | null>(null);
+  // Edicion de recuadros por el admin (temas, momentos y documentos)
+  const [editTopicIdx, setEditTopicIdx] = useState<number | null>(null);
+  const [editTopicText, setEditTopicText] = useState("");
+  const [savingTopicEdit, setSavingTopicEdit] = useState(false);
+  const [editConcl, setEditConcl] = useState<any | null>(null);
+  const [editConclTitle, setEditConclTitle] = useState("");
+  const [editConclContent, setEditConclContent] = useState("");
+  const [savingConcl, setSavingConcl] = useState(false);
+  const [editDoc, setEditDoc] = useState<any | null>(null);
+  const [editDocTitle, setEditDocTitle] = useState("");
+  const [editDocUrl, setEditDocUrl] = useState("");
+  const [savingDocEdit, setSavingDocEdit] = useState(false);
   const [commitModal, setCommitModal] = useState<any | null>(null);
   const [newDocOpen, setNewDocOpen] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState("");
@@ -431,6 +443,7 @@ export default function DiscussionRoom() {
       if (res.ok) {
         await fetchDiscussion();
         await fetchRelatoria();
+        await fetchDocs();
         setOverlay(null);
       }
     } catch (e) { console.error(e); }
@@ -470,6 +483,120 @@ export default function DiscussionRoom() {
         credentials: "include",
       });
       if (res.ok) { setEditingId(null); setEditText(""); fetchMessages(); }
+    } catch (e) { console.error(e); }
+  }
+
+  // ---- Admin: editar / eliminar recuadros del flujo de trabajo ----
+  async function saveTopicEdit(ti: number) {
+    if (!editTopicText.trim() || savingTopicEdit) return;
+    setSavingTopicEdit(true);
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/topics/${ti}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editTopicText.trim() }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setEditTopicIdx(null); setEditTopicText("");
+        setTopicInfos({});
+        await fetchModState(); await fetchDocs();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo guardar el tema");
+      }
+    } catch (e) { console.error(e); }
+    setSavingTopicEdit(false);
+  }
+
+  async function deleteTopic(ti: number) {
+    if (!confirm(`Eliminar el tema "${topicsList[ti]}"? Sus recuadros de momento tambien se retiran (los documentos quedan sueltos).`)) return;
+    try {
+      const res = await fetch(`/api/rest/workspaces/discussion/${discussionId}/topics/${ti}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setTopicInfos({});
+        await fetchModState(); await fetchDocs();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo eliminar el tema");
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function saveConclEdit() {
+    if (!editConcl || !editConclTitle.trim() || !editConclContent.trim() || savingConcl) return;
+    setSavingConcl(true);
+    try {
+      const res = await fetch(`/api/rest/workspaces/conclusions/${editConcl.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editConclTitle.trim(), content: editConclContent.trim() }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setEditConcl(null);
+        await fetchModState();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo guardar el recuadro");
+      }
+    } catch (e) { console.error(e); }
+    setSavingConcl(false);
+  }
+
+  async function deleteConcl(cn: any) {
+    if (!confirm(`Eliminar el recuadro "${cn.title}"? Los documentos anclados quedan sueltos.`)) return;
+    try {
+      const res = await fetch(`/api/rest/workspaces/conclusions/${cn.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) await fetchModState();
+      else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo eliminar el recuadro");
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  async function saveDocEdit() {
+    if (!editDoc || !editDocTitle.trim() || savingDocEdit) return;
+    setSavingDocEdit(true);
+    try {
+      const body: any = { title: editDocTitle.trim() };
+      if (editDoc.mimeType === "link/externo") body.url = editDocUrl.trim();
+      const res = await fetch(`/api/rest/workspaces/documents/${editDoc.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setEditDoc(null);
+        await fetchDocs();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "No se pudo guardar el documento");
+      }
+    } catch (e) { console.error(e); }
+    setSavingDocEdit(false);
+  }
+
+  async function deleteDoc(d: any) {
+    if (!confirm(`Eliminar el documento "${d.title}"?`)) return;
+    try {
+      const res = await fetch(`/api/rest/workspaces/documents/${d.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) await fetchDocs();
+      else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "No se pudo eliminar el documento");
+      }
     } catch (e) { console.error(e); }
   }
 
@@ -666,8 +793,8 @@ export default function DiscussionRoom() {
   const interventionsRequired = modState?.state?.interventionsRequired ?? 5;
   const progressPct = Math.min(100, Math.round((interventionsCompleted / Math.max(1, interventionsRequired)) * 100));
   const roundComplete = modActiveNow && interventionsCompleted >= interventionsRequired;
-  // Ronda completa con temas ya definidos: el avance queda en manos del moderador (persona)
-  const decisionPending = roundComplete && topicsList.length > 0;
+  // Ronda completa (de propuestas o de palabras): el avance queda en manos del moderador (persona)
+  const decisionPending = roundComplete;
   // Manos levantadas: usuarios que piden la palabra mientras el moderador decide
   const handsRaised: number[] = modState?.state?.handsRaised ?? [];
   const handsCount = handsRaised.length;
@@ -677,6 +804,8 @@ export default function DiscussionRoom() {
   // La relatoria en proceso muestra SOLO las conclusiones del tema actual (se reinicia por tema)
   const topicConclusions = conclusions.filter((cn) => (cn.topicIndex ?? 0) === topicIdx);
   const selectingTopics = modActiveNow && topicsList.length === 0;
+  // La relatoria oficial queda anexada como documento .docx descargable
+  const relatoriaDoc = docsList.find((d) => d.topic === "Relatoria oficial");
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -846,6 +975,7 @@ export default function DiscussionRoom() {
               {topicsList.map((t, ti) => {
                 const topicConcl = conclusions.filter((cn) => (cn.topicIndex ?? 0) === ti);
                 const topicDocs = docsList.filter((d) => {
+                  if (d.topic === "Relatoria oficial") return false;
                   if (d.conclusionId) {
                     const cn = conclusions.find((x) => x.id === d.conclusionId);
                     return cn ? (cn.topicIndex ?? 0) === ti : false;
@@ -860,7 +990,37 @@ export default function DiscussionRoom() {
                     <div className="w-56 border-2 rounded-xl bg-card shadow-sm flex flex-col overflow-hidden self-stretch">
                       <div className="di-gradient text-white px-3 py-1.5 flex items-center gap-1.5">
                         <span className="w-5 h-5 rounded-full bg-white/25 text-[10px] flex items-center justify-center shrink-0">{ti + 1}</span>
-                        <p className="text-xs font-semibold leading-tight">{t}</p>
+                        {editTopicIdx === ti ? (
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
+                            <input
+                              value={editTopicText}
+                              onChange={(e) => setEditTopicText(e.target.value)}
+                              className="flex-1 min-w-0 text-xs text-foreground rounded px-1 py-0.5"
+                              autoFocus
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveTopicEdit(ti); } }}
+                            />
+                            <button className="text-white/90 hover:text-white shrink-0" title="Guardar" disabled={savingTopicEdit} onClick={() => saveTopicEdit(ti)}>
+                              {savingTopicEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                            </button>
+                            <button className="text-white/70 hover:text-white shrink-0" title="Cancelar" onClick={() => { setEditTopicIdx(null); setEditTopicText(""); }}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-xs font-semibold leading-tight flex-1">{t}</p>
+                            {canModerate && (
+                              <span className="flex items-center gap-0.5 shrink-0">
+                                <button className="text-white/70 hover:text-white" title="Editar el texto del tema" onClick={() => { setEditTopicIdx(ti); setEditTopicText(t); }}>
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                                <button className="text-white/70 hover:text-white" title="Eliminar este tema" onClick={() => deleteTopic(ti)}>
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
                       <div className="p-2.5 bg-amber-50/70 flex-1">
                         {topicInfos[ti]?.desc ? (
@@ -897,7 +1057,27 @@ export default function DiscussionRoom() {
                             onClick={() => setConclModal(cn)}
                             title="Toca para abrir el block de notas completo de este momento"
                           >
-                            <p className="text-[9px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
+                            <div className="flex items-start justify-between gap-1">
+                              <p className="text-[9px] uppercase tracking-wide text-primary font-semibold">{phaseName(cn.phase)}</p>
+                              {canModerate && (
+                                <span className="flex items-center gap-0.5 shrink-0 -mt-0.5">
+                                  <button
+                                    className="text-muted-foreground hover:text-primary"
+                                    title="Editar este recuadro"
+                                    onClick={(e) => { e.stopPropagation(); setEditConcl(cn); setEditConclTitle(cn.title); setEditConclContent(cn.content || ""); }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    className="text-muted-foreground hover:text-red-500"
+                                    title="Eliminar este recuadro"
+                                    onClick={(e) => { e.stopPropagation(); deleteConcl(cn); }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] font-semibold leading-tight mt-0.5">{cn.title}</p>
                             <p className="text-[10px] text-muted-foreground leading-snug mt-1 line-clamp-3">{snippet}</p>
                             <p className="text-[9px] text-primary/70 mt-0.5">Toca para leer el block completo</p>
@@ -928,7 +1108,25 @@ export default function DiscussionRoom() {
                                   <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
                                     <FilePenLine className="h-3 w-3" /> Documento en linea
                                   </p>
-                                  <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                                  <div className="flex items-start justify-between gap-1 mt-0.5">
+                                    <p className="text-[11px] font-semibold leading-tight">{d.title}</p>
+                                    {canModerate && (
+                                      <span className="flex items-center gap-1 shrink-0">
+                                        <span
+                                          role="button" title="Editar documento" className="cursor-pointer text-muted-foreground hover:text-primary"
+                                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditDoc(d); setEditDocTitle(d.title); setEditDocUrl(d.mimeType === "link/externo" ? d.fileUrl : ""); }}
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </span>
+                                        <span
+                                          role="button" title="Eliminar documento" className="cursor-pointer text-muted-foreground hover:text-red-500"
+                                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteDoc(d); }}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
                                   {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
                                 </button>
                               ) : (
@@ -942,7 +1140,25 @@ export default function DiscussionRoom() {
                                     {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
                                     Documento
                                   </p>
-                                  <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                                  <div className="flex items-start justify-between gap-1 mt-0.5">
+                                    <p className="text-[11px] font-semibold leading-tight">{d.title}</p>
+                                    {canModerate && (
+                                      <span className="flex items-center gap-1 shrink-0">
+                                        <span
+                                          role="button" title="Editar documento" className="cursor-pointer text-muted-foreground hover:text-primary"
+                                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditDoc(d); setEditDocTitle(d.title); setEditDocUrl(d.mimeType === "link/externo" ? d.fileUrl : ""); }}
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </span>
+                                        <span
+                                          role="button" title="Eliminar documento" className="cursor-pointer text-muted-foreground hover:text-red-500"
+                                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteDoc(d); }}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
                                   {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
                                 </a>
                               )}
@@ -963,7 +1179,25 @@ export default function DiscussionRoom() {
                             <p className="text-[9px] uppercase tracking-wide text-primary font-semibold flex items-center gap-1">
                               <FilePenLine className="h-3 w-3" /> Documento en linea
                             </p>
-                            <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                            <div className="flex items-start justify-between gap-1 mt-0.5">
+                              <p className="text-[11px] font-semibold leading-tight">{d.title}</p>
+                              {canModerate && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <span
+                                    role="button" title="Editar documento" className="cursor-pointer text-muted-foreground hover:text-primary"
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditDoc(d); setEditDocTitle(d.title); setEditDocUrl(d.mimeType === "link/externo" ? d.fileUrl : ""); }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </span>
+                                  <span
+                                    role="button" title="Eliminar documento" className="cursor-pointer text-muted-foreground hover:text-red-500"
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteDoc(d); }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </span>
+                                </span>
+                              )}
+                            </div>
                             {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
                           </button>
                         ) : (
@@ -977,7 +1211,25 @@ export default function DiscussionRoom() {
                               {d.mimeType === "link/externo" ? <Link2 className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
                               Documento
                             </p>
-                            <p className="text-[11px] font-semibold leading-tight mt-0.5">{d.title}</p>
+                            <div className="flex items-start justify-between gap-1 mt-0.5">
+                              <p className="text-[11px] font-semibold leading-tight">{d.title}</p>
+                              {canModerate && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <span
+                                    role="button" title="Editar documento" className="cursor-pointer text-muted-foreground hover:text-primary"
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditDoc(d); setEditDocTitle(d.title); setEditDocUrl(d.mimeType === "link/externo" ? d.fileUrl : ""); }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </span>
+                                  <span
+                                    role="button" title="Eliminar documento" className="cursor-pointer text-muted-foreground hover:text-red-500"
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteDoc(d); }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </span>
+                                </span>
+                              )}
+                            </div>
                             {d.topic && <p className="text-[9px] text-muted-foreground mt-1">{d.topic}</p>}
                           </a>
                         )}
@@ -1008,11 +1260,25 @@ export default function DiscussionRoom() {
 
         {relatoria && (
           <Card className="border-2 border-primary mt-4">
-            <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center gap-2 rounded-t-xl">
-              <ScrollText className="h-4 w-4" /> Relatoria oficial
+            <div className="di-gradient px-4 py-2 text-white text-sm font-medium flex items-center justify-between gap-2 rounded-t-xl">
+              <span className="flex items-center gap-2"><ScrollText className="h-4 w-4" /> Relatoria oficial</span>
+              {relatoriaDoc && (
+                <a
+                  href={relatoriaDoc.fileUrl}
+                  download
+                  className="flex items-center gap-1.5 bg-white text-[#0a2540] text-xs font-semibold rounded-full px-3 py-1 hover:bg-gray-100"
+                >
+                  <Download className="h-3.5 w-3.5" /> Descargar .docx
+                </a>
+              )}
             </div>
             <CardContent className="pt-3">
               <MarkdownView content={relatoria.content} />
+              {relatoriaDoc && (
+                <p className="text-xs text-muted-foreground mt-3 border-t pt-3">
+                  La relatoria tambien quedo anexada como documento Word (.docx) con la sistematizacion completa del proceso: usa el boton de arriba para descargarla.
+                </p>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1130,12 +1396,35 @@ export default function DiscussionRoom() {
                             <>
                               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Momento actual</p>
                               <p className="font-display text-base leading-tight">Propuesta de temas</p>
-                              {roundComplete ? (
-                                <p className="text-xs text-primary flex items-center gap-1.5 mt-1">
-                                  <Loader2 className="h-3 w-3 animate-spin" /> La IA esta organizando los temas propuestos...
-                                </p>
+                              {decisionPending ? (
+                                <div className="mt-1">
+                                  <p className="text-xs text-primary font-medium">Ronda de propuestas completa ({interventionsRequired}).</p>
+                                  {canDecide ? (
+                                    <>
+                                      <p className="text-xs text-muted-foreground mt-0.5">Te toca decidir el siguiente paso.</p>
+                                      <Button size="sm" className="w-full mt-1.5 h-7 text-xs di-gradient text-white" onClick={() => { setModOpen(false); setOverlay({ kind: "decision" }); }}>
+                                        Decidir ahora
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground mt-0.5">El moderador esta definiendo el siguiente paso.</p>
+                                  )}
+                                </div>
                               ) : (
                                 <p className="text-xs mt-1">Propuestas: <strong>{interventionsCompleted} de {interventionsRequired}</strong></p>
+                              )}
+                              {/* El moderador puede definir los temas aunque la ronda no se complete */}
+                              {canDecide && !decisionPending && isOpen && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full mt-2 h-7 text-xs gap-1"
+                                  disabled={deciding !== null}
+                                  onClick={decideAdvance}
+                                >
+                                  {deciding === "advance" && <Loader2 className="h-3 w-3 animate-spin" />}
+                                  Definir los temas ahora
+                                </Button>
                               )}
                             </>
                           ) : (
@@ -1168,18 +1457,31 @@ export default function DiscussionRoom() {
                                   </div>
                                 </>
                               )}
-                              {/* El moderador (persona) puede forzar el avance aunque la ronda no se complete */}
+                              {/* El moderador (persona) decide el siguiente paso en cualquier
+                                  momento, sin importar el numero de intervenciones de la ronda */}
                               {canDecide && !decisionPending && topicsList.length > 0 && isOpen && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="w-full mt-2 h-7 text-xs gap-1"
-                                  disabled={deciding !== null}
-                                  onClick={decideAdvance}
-                                >
-                                  {deciding === "advance" && <Loader2 className="h-3 w-3 animate-spin" />}
-                                  Abrir el siguiente momento ahora
-                                </Button>
+                                <div className="grid grid-cols-2 gap-1.5 mt-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-[11px] gap-1 px-1.5"
+                                    disabled={deciding !== null}
+                                    onClick={decideNextRound}
+                                  >
+                                    {deciding === "round" && <Loader2 className="h-3 w-3 animate-spin" />}
+                                    Nueva ronda ahora
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-[11px] gap-1 px-1.5"
+                                    disabled={deciding !== null}
+                                    onClick={decideAdvance}
+                                  >
+                                    {deciding === "advance" && <Loader2 className="h-3 w-3 animate-spin" />}
+                                    Siguiente momento
+                                  </Button>
+                                </div>
                               )}
                             </>
                           )}
@@ -1230,7 +1532,7 @@ export default function DiscussionRoom() {
           {modActiveNow && !roundComplete && (
             <span className="text-[10px] bg-white/25 rounded-full px-2 py-0.5">{interventionsCompleted}/{interventionsRequired}</span>
           )}
-          {selectingTopics && roundComplete && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+
         </Button>
       </div>,
       document.body,
@@ -1425,6 +1727,60 @@ export default function DiscussionRoom() {
                   </Button>
                 )}
               </div>
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Modal: editar un recuadro de momento (admin) */}
+      {editConcl && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
+          <Card className="max-w-lg w-full border-2 shadow-2xl">
+            <div className="di-gradient px-4 py-3 text-white rounded-t-xl flex items-center justify-between">
+              <p className="font-display text-lg flex items-center gap-2"><Pencil className="h-5 w-5" /> Editar recuadro</p>
+              <button onClick={() => setEditConcl(null)} className="text-white/80 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 space-y-3">
+              <div className="space-y-1.5">
+                <Label>Titulo</Label>
+                <Input value={editConclTitle} onChange={(e) => setEditConclTitle(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Contenido (block de notas del momento)</Label>
+                <Textarea value={editConclContent} onChange={(e) => setEditConclContent(e.target.value)} rows={12} className="text-sm" />
+              </div>
+              <Button className="w-full di-gradient text-white" disabled={savingConcl || !editConclTitle.trim() || !editConclContent.trim()} onClick={saveConclEdit}>
+                {savingConcl ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar cambios"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* Modal: editar un recuadro de documento (admin) */}
+      {editDoc && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-md p-4">
+          <Card className="max-w-md w-full border-2 shadow-2xl">
+            <div className="di-gradient px-4 py-3 text-white rounded-t-xl flex items-center justify-between">
+              <p className="font-display text-lg flex items-center gap-2"><Pencil className="h-5 w-5" /> Editar documento</p>
+              <button onClick={() => setEditDoc(null)} className="text-white/80 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <CardContent className="pt-4 space-y-3">
+              <div className="space-y-1.5">
+                <Label>Titulo</Label>
+                <Input value={editDocTitle} onChange={(e) => setEditDocTitle(e.target.value)} />
+              </div>
+              {editDoc.mimeType === "link/externo" && (
+                <div className="space-y-1.5">
+                  <Label>Enlace</Label>
+                  <Input value={editDocUrl} onChange={(e) => setEditDocUrl(e.target.value)} placeholder="https://..." />
+                </div>
+              )}
+              <Button className="w-full di-gradient text-white" disabled={savingDocEdit || !editDocTitle.trim()} onClick={saveDocEdit}>
+                {savingDocEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar cambios"}
+              </Button>
             </CardContent>
           </Card>
         </div>,
